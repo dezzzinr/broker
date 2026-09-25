@@ -38,7 +38,7 @@ function LiveStatusPill() {
           "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium " +
           (isLive
             ? "border-positive/25 bg-positive/10 text-positive"
-            : "border-border bg-white/[0.04] text-muted")
+            : "border-border bg-fill-1 text-muted")
         }
       >
         <GlowDot color={isLive ? "var(--positive)" : "var(--muted)"} pulse={isLive} />

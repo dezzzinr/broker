@@ -55,7 +55,7 @@ export function DropdownMenu({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "inline-flex items-center justify-center rounded-lg text-muted transition-colors hover:bg-white/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+          "inline-flex items-center justify-center rounded-lg text-muted transition-colors hover:bg-fill-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
           triggerClassName
         )}
       >
@@ -87,7 +87,7 @@ export function DropdownItem({
       type="button"
       role="menuitem"
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-muted transition-colors hover:bg-white/[0.05] hover:text-foreground",
+        "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-muted transition-colors hover:bg-fill-2 hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
         className
       )}
       {...props}

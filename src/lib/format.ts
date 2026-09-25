@@ -107,3 +107,8 @@ export function timeAgo(from: Date, now: Date = new Date()): string {
   const d = Math.floor(h / 24);
   return `${d} d ago`;
 }
+
+/** Server-safe currency formatter used in emails, notifications and logs. */
+export function money(value: number, decimals = 2): string {
+  return formatUSD(Number.isFinite(value) ? value : 0, decimals);
+}

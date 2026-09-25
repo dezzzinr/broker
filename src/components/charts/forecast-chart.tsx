@@ -46,13 +46,13 @@ export function ForecastChart({
               <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.04} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+          <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
           <XAxis
             dataKey="t"
             tickFormatter={(t: number) =>
               new Date(t).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" })
             }
-            stroke="rgba(255,255,255,0.25)"
+            stroke="var(--chart-axis)"
             tick={{ fontSize: 10, fill: "var(--faint)" }}
             tickLine={false}
             axisLine={false}
@@ -62,14 +62,14 @@ export function ForecastChart({
           <YAxis
             domain={[(dataMin: number) => dataMin * 0.995, (dataMax: number) => dataMax * 1.005]}
             tickFormatter={(v: number) => fmt(v)}
-            stroke="rgba(255,255,255,0.25)"
+            stroke="var(--chart-axis)"
             tick={{ fontSize: 10, fill: "var(--faint)" }}
             tickLine={false}
             axisLine={false}
             width={56}
           />
           <RechartsTooltip
-            cursor={{ stroke: "rgba(255,255,255,0.14)", strokeDasharray: "3 3" }}
+            cursor={{ stroke: "var(--chart-cursor)", strokeDasharray: "3 3" }}
             content={
               <ValueTooltip
                 items={["expected", "low", "high"]}
@@ -109,7 +109,7 @@ export function ForecastChart({
             type="monotone"
             dataKey="base"
             name="Price"
-            stroke="rgba(255,255,255,0.4)"
+            stroke="var(--chart-axis)"
             strokeWidth={1.5}
             dot={false}
             animationDuration={900}

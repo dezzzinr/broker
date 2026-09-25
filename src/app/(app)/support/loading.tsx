@@ -1,5 +1,5 @@
 import { RouteSkeleton } from "@/components/shared/route-skeleton";
 
 export default function Loading() {
-  return <RouteSkeleton label="Loading support page" />;
+  return <RouteSkeleton label="Loading support desk" />;
 }

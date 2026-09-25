@@ -2,10 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_GROUPS, type NavItem } from "./nav-config";
+import { NAV_GROUPS, type NavGroup, type NavItem } from "./nav-config";
 import { cn } from "@/lib/utils";
 
-function NavItemLink({ item, active, onNavigate }: { item: NavItem; active: boolean; onNavigate?: () => void }) {
+function NavItemLink({
+  item,
+  active,
+  onNavigate,
+}: {
+  item: NavItem;
+  active: boolean;
+  onNavigate?: () => void;
+}) {
   const Icon = item.icon;
   return (
     <Link
@@ -16,10 +24,16 @@ function NavItemLink({ item, active, onNavigate }: { item: NavItem; active: bool
       className={cn(
         "group relative flex h-10 items-center gap-3 rounded-xl border px-3 text-[13px] font-medium transition-all duration-200",
         active
-          ? "border-accent/25 bg-white/[0.06] text-foreground shadow-[0_0_20px_-8px_var(--accent-glow),inset_0_1px_0_rgba(255,255,255,0.04)]"
-          : "border-transparent text-muted hover:bg-white/[0.04] hover:text-foreground"
+          ? "border-accent/25 bg-fill-2 text-foreground shadow-[0_0_20px_-8px_var(--accent-glow),inset_0_1px_0_var(--fill-1)]"
+          : "border-transparent text-muted hover:bg-fill-1 hover:text-foreground"
       )}
     >
+      {active && (
+        <span
+          aria-hidden
+          className="absolute -left-4 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-gradient-accent"
+        />
+      )}
       <Icon
         className={cn(
           "size-[17px] shrink-0 transition-colors",
@@ -33,20 +47,26 @@ function NavItemLink({ item, active, onNavigate }: { item: NavItem; active: bool
           {item.badge}
         </span>
       )}
-      {item.count !== undefined && (
-        <span className="flex min-w-[18px] items-center justify-center rounded-full bg-negative/15 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
-          {item.count}
+      {item.count !== undefined && item.count > 0 && (
+        <span className="flex min-w-[18px] items-center justify-center rounded-full bg-negative/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-negative">
+          {item.count > 99 ? "99+" : item.count}
         </span>
       )}
     </Link>
   );
 }
 
-export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarNav({
+  groups = NAV_GROUPS,
+  onNavigate,
+}: {
+  groups?: NavGroup[];
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   return (
     <nav aria-label="Primary" className="flex flex-col gap-6">
-      {NAV_GROUPS.map((group, gi) => (
+      {groups.map((group, gi) => (
         <div key={`${group.label}-${gi}`}>
           <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
             {group.label}
@@ -56,7 +76,11 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               <NavItemLink
                 key={item.label}
                 item={item}
-                active={pathname === item.href || pathname.startsWith(`${item.href}/`)}
+                active={
+                  item.href === "/admin"
+                    ? pathname === "/admin"
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`)
+                }
                 onNavigate={onNavigate}
               />
             ))}

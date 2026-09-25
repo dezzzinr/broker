@@ -108,7 +108,7 @@ export function Select({
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-white/[0.03] text-left transition-colors hover:border-border-strong",
+          "flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-fill-1 text-left transition-colors hover:border-border-strong",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25 focus-visible:border-accent/50",
           size === "lg" ? "h-11 px-3.5 text-sm" : "h-9 px-3 text-[13px]",
           buttonClassName
@@ -149,7 +149,7 @@ export function Select({
                 onClick={() => commit(opt.value)}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
-                  i === active ? "bg-white/[0.06] text-foreground" : "text-muted",
+                  i === active ? "bg-fill-2 text-foreground" : "text-muted",
                   selected && "text-foreground"
                 )}
               >

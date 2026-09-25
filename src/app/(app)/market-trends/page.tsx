@@ -123,7 +123,7 @@ export default function MarketTrendsPage() {
                 <li key={t.coinId}>
                   <Link
                     href={`/trade?coin=${coin.id}`}
-                    className="flex items-center gap-3 rounded-xl px-2.5 py-2.5 transition-colors hover:bg-white/[0.03]"
+                    className="flex items-center gap-3 rounded-xl px-2.5 py-2.5 transition-colors hover:bg-fill-1"
                   >
                     <span className="w-4 text-center text-[12px] tabular-nums text-faint">{i + 1}</span>
                     <CoinIcon symbol={coin.symbol} color={coin.color} size={28} />
@@ -177,7 +177,7 @@ export default function MarketTrendsPage() {
                       <Link
                         key={coin.id}
                         href={`/trade?coin=${coin.id}`}
-                        className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-white/[0.025]"
+                        className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-fill-1"
                       >
                         <CoinIcon symbol={coin.symbol} color={coin.color} size={32} />
                         <div className="min-w-0 flex-1">

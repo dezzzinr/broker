@@ -8,12 +8,12 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-gradient-accent text-white shadow-[0_4px_16px_-6px_var(--accent-glow)] hover:brightness-110 hover:shadow-[0_6px_20px_-6px_var(--accent-glow)]",
+          "bg-gradient-accent text-on-accent shadow-[0_4px_16px_-6px_var(--accent-glow)] hover:brightness-110 hover:shadow-[0_6px_20px_-6px_var(--accent-glow)]",
         secondary:
-          "bg-white/[0.06] text-foreground border border-border hover:bg-white/[0.09] hover:border-border-strong",
+          "bg-fill-2 text-foreground border border-border hover:bg-fill-3 hover:border-border-strong",
         outline:
-          "border border-border text-foreground hover:bg-white/[0.04] hover:border-border-strong",
-        ghost: "text-muted hover:bg-white/[0.05] hover:text-foreground",
+          "border border-border text-foreground hover:bg-fill-1 hover:border-border-strong",
+        ghost: "text-muted hover:bg-fill-2 hover:text-foreground",
         positive:
           "bg-positive/15 text-positive border border-positive/25 hover:bg-positive/22 hover:border-positive/40",
         negative:

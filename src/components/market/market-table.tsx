@@ -104,7 +104,7 @@ export function MarketTable({
                         variant: "success",
                       });
                     }}
-                    className="inline-flex size-7 items-center justify-center rounded-lg text-faint transition-colors hover:bg-white/[0.06] hover:text-warning"
+                    className="inline-flex size-7 items-center justify-center rounded-lg text-faint transition-colors hover:bg-fill-2 hover:text-warning"
                   >
                     <Star className={cn("size-4", watched && "fill-warning text-warning")} aria-hidden />
                   </button>

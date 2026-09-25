@@ -69,8 +69,8 @@ export function SearchBox({ className }: { className?: string }) {
             if (e.key === "Enter" && results.length > 0) go(results[0].id);
           }}
           className={cn(
-            "h-9 w-full rounded-lg border border-border bg-white/[0.03] pl-9 pr-3 text-[13px] text-foreground transition-colors",
-            "placeholder:text-faint focus-visible:border-accent/50 focus-visible:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25",
+            "h-9 w-full rounded-lg border border-border bg-fill-1 pl-9 pr-3 text-[13px] text-foreground transition-colors",
+            "placeholder:text-faint focus-visible:border-accent/50 focus-visible:bg-fill-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25",
             "[&::-webkit-search-cancel-button]:appearance-none",
             className?.includes("w-") ? "" : "sm:w-60"
           )}
@@ -95,7 +95,7 @@ export function SearchBox({ className }: { className?: string }) {
                 role="option"
                 aria-selected={false}
                 onClick={() => go(coin.id)}
-                className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/[0.05]"
+                className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-fill-2"
               >
                 <CoinIcon symbol={coin.symbol} color={coin.color} size={26} />
                 <span className="min-w-0 flex-1">

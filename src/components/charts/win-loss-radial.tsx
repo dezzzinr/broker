@@ -32,7 +32,7 @@ export function WinLossRadial({
             dataKey="value"
             cornerRadius={12}
             fill="var(--accent)"
-            background={{ fill: "rgba(255,255,255,0.06)" }}
+            background={{ fill: "var(--chart-track)" }}
             animationDuration={900}
           />
         </RadialBarChart>

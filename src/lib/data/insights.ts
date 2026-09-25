@@ -1,4 +1,4 @@
-/** Mock content for Insights, Support and static copy. */
+/** Static editorial content for the Insights page (signals, forecast metadata, weekly brief). */
 
 export interface InsightSignal {
   id: string;
@@ -69,62 +69,3 @@ export const FORECAST_META = {
 };
 
 /* ------------------------------- Support -------------------------------- */
-
-export interface Announcement {
-  id: string;
-  title: string;
-  body: string;
-  date: string;
-  unread: boolean;
-  category: "Maintenance" | "Product" | "Security";
-}
-
-export const ANNOUNCEMENTS: Announcement[] = [
-  {
-    id: "an-1",
-    title: "Scheduled maintenance — analytics engine upgrade",
-    body: "We are upgrading the Quantix analytics engine on Sunday, 02:00–04:00 UTC. Dashboards remain available; AI signals may be briefly delayed.",
-    date: "2026-09-20T09:00:00Z",
-    unread: true,
-    category: "Maintenance",
-  },
-  {
-    id: "an-2",
-    title: "New in beta: cross-asset correlation matrix",
-    body: "Analytics now includes a rolling 30-day correlation matrix across your portfolio assets, updated hourly. Find it under Analytics → Correlations.",
-    date: "2026-09-18T14:30:00Z",
-    unread: true,
-    category: "Product",
-  },
-  {
-    id: "an-3",
-    title: "Security reminder: enable 2FA",
-    body: "Keep your demo account safe. Two-factor authentication can be enabled from Settings → Security at any time.",
-    date: "2026-09-10T08:00:00Z",
-    unread: false,
-    category: "Security",
-  },
-];
-
-export const FAQS = [
-  {
-    q: "Is Quantix connected to real funds or exchanges?",
-    a: "No. Quantix is a demonstration interface running on simulated market data. Orders, deposits and withdrawals are illustrative only and never touch real money.",
-  },
-  {
-    q: "How are the AI signals generated?",
-    a: "Signals combine deterministic mock analytics in this demo. In production, the same UI is designed to consume model outputs from the Quantix signal service.",
-  },
-  {
-    q: "Can I connect a real exchange account later?",
-    a: "Yes. The data layer isolates market/account services behind a CryptoService interface, so a licensed exchange integration can be added without rewriting the UI.",
-  },
-  {
-    q: "Where is my watchlist stored?",
-    a: "Your watchlist and UI preferences are persisted locally in your browser (localStorage). Clearing site data resets them.",
-  },
-  {
-    q: "How do I report an issue?",
-    a: "Use the contact form on this page. In this demo, submissions are simulated and no message is actually sent.",
-  },
-];

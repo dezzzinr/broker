@@ -37,7 +37,7 @@ export function CryptoTicker({ className }: { className?: string }) {
                 role="listitem"
                 onClick={() => router.push(`/trade?coin=${coin.id}`)}
                 aria-label={`${coin.pair} — ${formatPrice(coin.price)}, ${coin.change24h.toFixed(2)}% today. Open trade page.`}
-                className="flex shrink-0 items-center gap-2.5 border-r border-border px-4 py-3 text-left transition-colors last:border-r-0 hover:bg-white/[0.03] focus-visible:bg-white/[0.05] focus-visible:outline-none"
+                className="flex shrink-0 items-center gap-2.5 border-r border-border px-4 py-3 text-left transition-colors last:border-r-0 hover:bg-fill-1 focus-visible:bg-fill-2 focus-visible:outline-none"
               >
                 <CoinIcon symbol={coin.symbol} color={coin.color} size={24} />
                 <span className="flex flex-col">

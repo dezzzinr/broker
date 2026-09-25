@@ -50,10 +50,10 @@ export function BarChartPanel({
               <stop offset="100%" stopColor={color} stopOpacity={0.35} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+          <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
           <XAxis
             dataKey="label"
-            stroke="rgba(255,255,255,0.25)"
+            stroke="var(--chart-axis)"
             tick={{ fontSize: 10, fill: "var(--faint)" }}
             tickLine={false}
             axisLine={false}
@@ -61,7 +61,7 @@ export function BarChartPanel({
           />
           <YAxis
             tickFormatter={(v: number) => fmt(v)}
-            stroke="rgba(255,255,255,0.25)"
+            stroke="var(--chart-axis)"
             tick={{ fontSize: 10, fill: "var(--faint)" }}
             tickLine={false}
             axisLine={false}
@@ -69,7 +69,7 @@ export function BarChartPanel({
             domain={hasNegative ? ["auto", "auto"] : undefined}
           />
           <RechartsTooltip
-            cursor={{ fill: "rgba(255,255,255,0.03)" }}
+            cursor={{ fill: "var(--fill-1)" }}
             content={<ValueTooltip valueFormatter={(v) => fmt(v)} />}
           />
           <Bar dataKey="value" name="Value" radius={[5, 5, hasNegative ? 0 : 5, hasNegative ? 0 : 5]} animationDuration={800} maxBarSize={38}>

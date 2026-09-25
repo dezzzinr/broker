@@ -1,13 +1,31 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 
-export type AccentName = "violet" | "blue" | "emerald" | "amber";
+export type AccentName =
+  | "violet"
+  | "blue"
+  | "emerald"
+  | "teal"
+  | "cyan"
+  | "amber"
+  | "rose"
+  | "fuchsia";
+export type ThemeName = "dark" | "light" | "system";
 export type OrderTypePref = "market" | "limit";
 
 export interface AppSettings {
   accent: AccentName;
+  theme: ThemeName;
   reduceMotion: boolean;
   defaultOrderType: OrderTypePref;
   slippage: number;
@@ -17,13 +35,26 @@ export interface AppSettings {
     orderFills: boolean;
     weeklyDigest: boolean;
     productNews: boolean;
+    depositUpdates: boolean;
   };
   twoFactor: boolean;
-  profile: { name: string; email: string };
+  profile: { name: string; email: string; phone: string; country: string };
 }
+
+export const ACCENT_CHOICES: { value: AccentName; label: string; swatch: string }[] = [
+  { value: "violet", label: "Violet", swatch: "#8B5CF6" },
+  { value: "blue", label: "Azure", swatch: "#4F8CFF" },
+  { value: "emerald", label: "Emerald", swatch: "#2DD4A7" },
+  { value: "teal", label: "Teal", swatch: "#14B8A6" },
+  { value: "cyan", label: "Cyan", swatch: "#22D3EE" },
+  { value: "amber", label: "Amber", swatch: "#F59E0B" },
+  { value: "rose", label: "Rose", swatch: "#FB5D78" },
+  { value: "fuchsia", label: "Fuchsia", swatch: "#D946EF" },
+];
 
 export const DEFAULT_SETTINGS: AppSettings = {
   accent: "violet",
+  theme: "dark",
   reduceMotion: false,
   defaultOrderType: "limit",
   slippage: 0.5,
@@ -33,24 +64,50 @@ export const DEFAULT_SETTINGS: AppSettings = {
     orderFills: true,
     weeklyDigest: false,
     productNews: true,
+    depositUpdates: true,
   },
   twoFactor: false,
-  profile: { name: "Jason Moreau", email: "jason@quantix.app" },
+  profile: { name: "", email: "", phone: "", country: "" },
 };
 
 interface SettingsApi {
   settings: AppSettings;
   hydrated: boolean;
+  /** Resolved theme after applying the "system" preference. */
+  resolvedTheme: "dark" | "light";
   update: (patch: Partial<AppSettings>) => void;
+  setTheme: (theme: ThemeName) => void;
+  toggleTheme: () => void;
   updateNotification: (key: keyof AppSettings["notifications"], value: boolean) => void;
   reset: () => void;
 }
 
 const SettingsContext = createContext<SettingsApi | null>(null);
 
+const STORAGE_KEY = "quantix:settings";
+
+function systemPrefersLight(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia("(prefers-color-scheme: light)").matches;
+}
+
+/** Applies theme/accent/motion to <html> — also used by the pre-paint script. */
+export function applyAppearance(
+  root: HTMLElement,
+  settings: Pick<AppSettings, "theme" | "accent" | "reduceMotion">
+) {
+  const resolved =
+    settings.theme === "system" ? (systemPrefersLight() ? "light" : "dark") : settings.theme;
+  root.dataset.theme = resolved;
+  root.dataset.accent = settings.accent;
+  root.dataset.motion = settings.reduceMotion ? "reduced" : "full";
+  root.style.colorScheme = resolved;
+  return resolved;
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings, hydrated] = useLocalStorage<AppSettings>(
-    "quantix:settings",
+    STORAGE_KEY,
     DEFAULT_SETTINGS
   );
 
@@ -64,30 +121,68 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [settings]
   );
 
-  const update = (patch: Partial<AppSettings>) =>
-    setSettings((prev) => ({ ...DEFAULT_SETTINGS, ...prev, ...patch }));
+  const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">("dark");
 
-  const updateNotification = (key: keyof AppSettings["notifications"], value: boolean) =>
-    setSettings((prev) => ({
-      ...DEFAULT_SETTINGS,
-      ...prev,
-      notifications: { ...prev.notifications, [key]: value },
-    }));
+  const update = useCallback(
+    (patch: Partial<AppSettings>) =>
+      setSettings((prev) => ({ ...DEFAULT_SETTINGS, ...prev, ...patch })),
+    [setSettings]
+  );
 
-  const reset = () => setSettings(DEFAULT_SETTINGS);
+  const updateNotification = useCallback(
+    (key: keyof AppSettings["notifications"], value: boolean) =>
+      setSettings((prev) => ({
+        ...DEFAULT_SETTINGS,
+        ...prev,
+        notifications: { ...prev.notifications, [key]: value },
+      })),
+    [setSettings]
+  );
+
+  const reset = useCallback(() => setSettings(DEFAULT_SETTINGS), [setSettings]);
 
   // Apply appearance prefs to <html> (post-commit, CSR only)
   useEffect(() => {
     const root = document.documentElement;
-    root.dataset.accent = merged.accent;
-    root.dataset.motion = merged.reduceMotion ? "reduced" : "full";
-  }, [merged.accent, merged.reduceMotion]);
+    const resolved = applyAppearance(root, merged);
+    setResolvedTheme(resolved);
+    window.dispatchEvent(new CustomEvent("quantix:themechange", { detail: resolved }));
+  }, [merged.theme, merged.accent, merged.reduceMotion, merged]);
 
-  return (
-    <SettingsContext.Provider value={{ settings: merged, hydrated, update, updateNotification, reset }}>
-      {children}
-    </SettingsContext.Provider>
+  // Follow OS changes while in "system" mode
+  useEffect(() => {
+    if (merged.theme !== "system" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = () => {
+      const resolved = applyAppearance(document.documentElement, merged);
+      setResolvedTheme(resolved);
+      window.dispatchEvent(new CustomEvent("quantix:themechange", { detail: resolved }));
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [merged]);
+
+  const setTheme = useCallback((theme: ThemeName) => update({ theme }), [update]);
+  const toggleTheme = useCallback(
+    () => update({ theme: resolvedTheme === "dark" ? "light" : "dark" }),
+    [update, resolvedTheme]
   );
+
+  const api = useMemo(
+    () => ({
+      settings: merged,
+      hydrated,
+      resolvedTheme,
+      update,
+      setTheme,
+      toggleTheme,
+      updateNotification,
+      reset,
+    }),
+    [merged, hydrated, resolvedTheme, update, setTheme, toggleTheme, updateNotification, reset]
+  );
+
+  return <SettingsContext.Provider value={api}>{children}</SettingsContext.Provider>;
 }
 
 export function useSettings() {

@@ -53,7 +53,7 @@ export function CryptoChart({
           <YAxis hide domain={[min - pad, max + pad]} />
           {interactive && (
             <RechartsTooltip
-              cursor={{ stroke: "rgba(255,255,255,0.14)", strokeWidth: 1, strokeDasharray: "3 3" }}
+              cursor={{ stroke: "var(--chart-cursor)", strokeWidth: 1, strokeDasharray: "3 3" }}
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
                 const p = payload[0].payload as ChartPoint;
@@ -99,7 +99,7 @@ export function CryptoChart({
                               cy={cy}
                               r={2.6}
                               fill={color}
-                              stroke="#0B0D13"
+                              stroke="var(--card)"
                               strokeWidth={1.4}
                               style={{ filter: `drop-shadow(0 0 5px ${color})` }}
                             />

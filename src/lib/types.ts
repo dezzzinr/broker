@@ -26,54 +26,6 @@ export interface Coin {
   chartData: ChartPoint[];
 }
 
-export type TransactionType =
-  | "buy"
-  | "sell"
-  | "deposit"
-  | "withdrawal"
-  | "transfer"
-  | "reward";
-
-export type TransactionStatus = "completed" | "pending" | "failed";
-
-export interface Transaction {
-  id: string;
-  date: string; // ISO string
-  type: TransactionType;
-  assetSymbol: string;
-  amount: number;
-  price: number; // unit price at execution
-  fee: number;
-  status: TransactionStatus;
-  note?: string;
-}
-
-export interface Holding {
-  coinId: string;
-  amount: number;
-  avgCost: number;
-}
-
-export interface HoldingRow extends Holding {
-  coin: Coin;
-  value: number;
-  pnl: number;
-  pnlPct: number;
-  allocationPct: number;
-}
-
-export interface PortfolioSummary {
-  totalValue: number;
-  availableCash: number;
-  todayPL: number;
-  todayPLPct: number;
-  totalPL: number;
-  totalPLPct: number;
-  totalCost: number;
-  performance: ChartPoint[];
-  holdings: HoldingRow[];
-}
-
 export interface AllocationSlice {
   id: string;
   label: string;

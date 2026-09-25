@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // better-sqlite3 is a native module — keep it out of the bundler.
+  serverExternalPackages: ["better-sqlite3"],
+  experimental: {
+    // Larger multipart bodies (proof-of-payment uploads) are streamed, but keep
+    // the server action/route limit generous for form posts.
+    serverActions: { bodySizeLimit: "8mb" },
+  },
 };
 
 export default nextConfig;

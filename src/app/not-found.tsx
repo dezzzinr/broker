@@ -16,7 +16,7 @@ export default function NotFound() {
       </div>
       <Link
         href="/dashboard"
-        className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-accent px-5 text-[13px] font-medium text-white transition-all hover:brightness-110"
+        className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-accent px-5 text-[13px] font-medium text-on-accent transition-all hover:brightness-110"
       >
         <Compass className="size-4" aria-hidden />
         Back to dashboard

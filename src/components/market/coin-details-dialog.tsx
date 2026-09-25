@@ -77,7 +77,7 @@ export function CoinDetailsDialog({ coinId, onClose }: { coinId: string | null; 
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-2">
-            <div role="tablist" aria-label="Chart range" className="inline-flex rounded-lg border border-border bg-white/[0.03] p-0.5">
+            <div role="tablist" aria-label="Chart range" className="inline-flex rounded-lg border border-border bg-fill-1 p-0.5">
               {RANGES.map((r) => (
                 <button
                   key={r}
@@ -86,7 +86,7 @@ export function CoinDetailsDialog({ coinId, onClose }: { coinId: string | null; 
                   onClick={() => setRange(r)}
                   className={cn(
                     "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
-                    range === r ? "bg-white/[0.08] text-foreground" : "text-muted hover:text-foreground"
+                    range === r ? "bg-fill-3 text-foreground" : "text-muted hover:text-foreground"
                   )}
                 >
                   {r}

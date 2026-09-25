@@ -44,7 +44,7 @@ export function AreaChartPanel({
               <stop offset="100%" stopColor={color} stopOpacity={0.01} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+          <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
           <XAxis
             dataKey="t"
             tickFormatter={(t: number) =>
@@ -52,7 +52,7 @@ export function AreaChartPanel({
                 ? xTickFormatter(t)
                 : new Date(t).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" })
             }
-            stroke="rgba(255,255,255,0.25)"
+            stroke="var(--chart-axis)"
             tick={{ fontSize: 10, fill: "var(--faint)" }}
             tickLine={false}
             axisLine={false}
@@ -63,14 +63,14 @@ export function AreaChartPanel({
             tickFormatter={(v: number) =>
               yTickFormatter ? yTickFormatter(v) : `$${Intl.NumberFormat("en", { notation: "compact" }).format(v)}`
             }
-            stroke="rgba(255,255,255,0.25)"
+            stroke="var(--chart-axis)"
             tick={{ fontSize: 10, fill: "var(--faint)" }}
             tickLine={false}
             axisLine={false}
             width={52}
           />
           <RechartsTooltip
-            cursor={{ stroke: "rgba(255,255,255,0.14)", strokeDasharray: "3 3" }}
+            cursor={{ stroke: "var(--chart-cursor)", strokeDasharray: "3 3" }}
             content={
               <ValueTooltip
                 valueFormatter={(v) => fmt(v)}
@@ -93,7 +93,7 @@ export function AreaChartPanel({
             strokeWidth={2}
             fill={`url(#${gradId})`}
             animationDuration={900}
-            activeDot={{ r: 4, strokeWidth: 2, stroke: "#0B0D13", fill: color }}
+            activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)", fill: color }}
           />
         </AreaChart>
       </ResponsiveContainer>

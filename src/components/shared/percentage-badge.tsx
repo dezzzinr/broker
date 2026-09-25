@@ -28,7 +28,7 @@ export function PercentageBadge({
         size === "sm" ? "px-1.5 py-px text-[11px]" : "px-2 py-0.5 text-xs",
         positive && "border-positive/20 bg-positive/10 text-positive",
         !positive && !neutral && "border-negative/20 bg-negative/10 text-negative",
-        neutral && "border-border bg-white/[0.05] text-muted",
+        neutral && "border-border bg-fill-2 text-muted",
         className
       )}
     >

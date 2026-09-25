@@ -45,7 +45,7 @@ export function SentimentGauge({
               dataKey="value"
               cornerRadius={10}
               fill={`url(#${gradId})`}
-              background={{ fill: "rgba(255,255,255,0.06)" }}
+              background={{ fill: "var(--chart-track)" }}
               animationDuration={900}
             />
           </RadialBarChart>

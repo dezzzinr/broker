@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDownRight, ArrowUpRight, FlaskConical, Info } from "lucide-react";
-import { DEMO_BALANCES } from "@/lib/data/portfolio";
+import { ArrowDownRight, ArrowUpRight, Info, Loader2, Wallet as WalletIcon } from "lucide-react";
+import { api, ApiRequestError } from "@/lib/api";
 import type { Coin } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatAmount, formatCompactUSD, formatPrice, formatUSD } from "@/lib/format";
 import { generateSeries, hashSeed, mulberry32 } from "@/lib/random";
 import { useLiveMarket } from "@/components/providers/live-market-provider";
+import { useWallet } from "@/components/providers/wallet-provider";
 import { useSettings } from "@/components/providers/settings-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import { PageHeader } from "@/components/shared/page-header";
@@ -46,6 +48,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
   const { coins, getCoin, loading } = useLiveMarket();
   const { settings } = useSettings();
   const { toast } = useToast();
+  const { amount: walletAmount, refresh: refreshWallet } = useWallet();
 
   const coin: Coin | undefined = getCoin(initialCoinId) ?? coins[0];
 
@@ -55,6 +58,8 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
   const [amountInput, setAmountInput] = useState("");
   const [chartRange, setChartRange] = useState<ChartRange>("7D");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   useEffect(() => {
     setOrderType(settings.defaultOrderType);
@@ -127,9 +132,9 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
   }
 
   const baseSymbol = coin.symbol;
-  const quoteSymbol = "USDT";
-  const baseBalance = DEMO_BALANCES[baseSymbol] ?? 0;
-  const quoteBalance = DEMO_BALANCES[quoteSymbol] ?? 0;
+  const quoteSymbol = "USD";
+  const baseBalance = walletAmount(baseSymbol);
+  const quoteBalance = walletAmount(quoteSymbol);
 
   const limitPrice = orderType === "limit" ? Number.parseFloat(priceInput) || 0 : coin.price;
   const amount = Number.parseFloat(amountInput) || 0;
@@ -145,23 +150,46 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
   };
 
   const submit = () => {
-    if (!canSubmit) return;
-    if (settings.confirmOrders) {
-      setConfirmOpen(true);
-    } else {
-      executeDemoOrder();
-    }
+    if (!canSubmit || submitting) return;
+    setOrderError(null);
+    if (settings.confirmOrders) setConfirmOpen(true);
+    else void executeOrder();
   };
 
-  const executeDemoOrder = () => {
-    setConfirmOpen(false);
-    setAmountInput("");
-    setPriceInput("");
-    toast({
-      title: "Demo order submitted",
-      description: `${side === "buy" ? "Buy" : "Sell"} ${formatAmount(amount)} ${baseSymbol} — simulated fill, no real order was placed.`,
-      variant: "info",
-    });
+  const executeOrder = async () => {
+    if (!coin) return;
+    setSubmitting(true);
+    setOrderError(null);
+    try {
+      const result = await api<{ txId: string; fee: number; total: number }>("/api/trade", {
+        method: "POST",
+        body: {
+          coinId: coin.id,
+          side,
+          orderType,
+          baseAmount: amount,
+          price: limitPrice,
+        },
+      });
+      setConfirmOpen(false);
+      setAmountInput("");
+      setPriceInput("");
+      await refreshWallet();
+      toast({
+        title: `${side === "buy" ? "Buy" : "Sell"} order filled`,
+        description: `${formatAmount(amount)} ${baseSymbol} at ${formatPrice(limitPrice)} · fee ${formatUSD(result.fee)}`,
+        variant: "success",
+      });
+    } catch (err) {
+      const message =
+        err instanceof ApiRequestError ? err.message : "The order could not be placed.";
+      setOrderError(message);
+      setConfirmOpen(false);
+      toast({ title: "Order rejected", description: message, variant: "error" });
+      await refreshWallet();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const stats = [
@@ -176,12 +204,15 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
     <div className="space-y-5">
       <PageHeader
         title="Trade"
-        description="Demo trading interface — orders are simulated end-to-end and never sent to a real exchange."
+        description="Spot orders settle instantly against your Quantix balances at the live quoted price."
         actions={
-          <span className="inline-flex items-center gap-2 rounded-full border border-warning/25 bg-warning/10 px-3 py-1.5 text-xs font-medium text-warning">
-            <FlaskConical className="size-3.5" aria-hidden />
-            Demo Trading
-          </span>
+          <Link
+            href="/wallet"
+            className="inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent-soft px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:border-accent/50"
+          >
+            <WalletIcon className="size-3.5" aria-hidden />
+            Cash {formatUSD(quoteBalance)}
+          </Link>
         }
       />
 
@@ -200,7 +231,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
                   options={coins.map((c) => ({ value: c.id, label: c.pair, hint: formatPrice(c.price) }))}
                   className="w-44"
                   size="lg"
-                  buttonClassName="border-0 bg-white/[0.05] text-base"
+                  buttonClassName="border-0 bg-fill-2 text-base"
                 />
               </div>
               <div>
@@ -229,7 +260,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
           <Card>
             <div className="flex flex-wrap items-center justify-between gap-3 p-5 pb-0">
               <h2 className="text-[15px] font-semibold text-foreground">{coin.pair} price</h2>
-              <div role="tablist" aria-label="Chart range" className="inline-flex rounded-lg border border-border bg-white/[0.03] p-0.5">
+              <div role="tablist" aria-label="Chart range" className="inline-flex rounded-lg border border-border bg-fill-1 p-0.5">
                 {RANGES.map((r) => (
                   <button
                     key={r}
@@ -238,7 +269,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
                     onClick={() => setChartRange(r)}
                     className={cn(
                       "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
-                      chartRange === r ? "bg-white/[0.08] text-foreground" : "text-muted hover:text-foreground"
+                      chartRange === r ? "bg-fill-3 text-foreground" : "text-muted hover:text-foreground"
                     )}
                   >
                     {r}
@@ -273,7 +304,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
                       <span className="relative text-muted">{level.amount}</span>
                     </div>
                   ))}
-                  <div className="my-1.5 flex items-center justify-between rounded-lg border border-border bg-white/[0.03] px-2 py-1.5">
+                  <div className="my-1.5 flex items-center justify-between rounded-lg border border-border bg-fill-1 px-2 py-1.5">
                     <span className="text-[13px] font-semibold tabular-nums text-foreground">{formatPrice(coin.price)}</span>
                     <span className="text-[10px] uppercase tracking-wider text-faint">Spread</span>
                   </div>
@@ -297,7 +328,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
               <p className="mt-0.5 text-[11px] text-faint">Simulated tape</p>
               <div className="mt-3 max-h-[280px] space-y-1 overflow-y-auto pr-1">
                 {trades.map((t, i) => (
-                  <div key={i} className="flex items-center justify-between rounded px-2 py-1 text-[12px] tabular-nums odd:bg-white/[0.02]">
+                  <div key={i} className="flex items-center justify-between rounded px-2 py-1 text-[12px] tabular-nums odd:bg-fill-1">
                     <span className="text-faint">
                       {new Date(t.time).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" })}
                     </span>
@@ -314,7 +345,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
         <Card className="lg:sticky lg:top-24">
           <div className="p-5">
             {/* Buy / Sell */}
-            <div role="tablist" aria-label="Order side" className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-white/[0.03] p-1">
+            <div role="tablist" aria-label="Order side" className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-fill-1 p-1">
               {(["buy", "sell"] as const).map((s) => (
                 <button
                   key={s}
@@ -338,7 +369,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
             </div>
 
             {/* Order type */}
-            <div className="mt-3 flex gap-1 rounded-lg border border-border bg-white/[0.03] p-0.5" role="tablist" aria-label="Order type">
+            <div className="mt-3 flex gap-1 rounded-lg border border-border bg-fill-1 p-0.5" role="tablist" aria-label="Order type">
               {(["market", "limit"] as const).map((t) => (
                 <button
                   key={t}
@@ -347,7 +378,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
                   onClick={() => setOrderType(t)}
                   className={cn(
                     "h-7 flex-1 rounded-md text-[11px] font-medium capitalize transition-colors",
-                    orderType === t ? "bg-white/[0.08] text-foreground" : "text-muted hover:text-foreground"
+                    orderType === t ? "bg-fill-3 text-foreground" : "text-muted hover:text-foreground"
                   )}
                 >
                   {t}
@@ -395,7 +426,7 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
                       key={p}
                       type="button"
                       onClick={() => applyPercent(p)}
-                      className="rounded-lg border border-border bg-white/[0.03] py-1.5 text-[11px] font-medium text-muted transition-colors hover:border-accent/40 hover:text-foreground"
+                      className="rounded-lg border border-border bg-fill-1 py-1.5 text-[11px] font-medium text-muted transition-colors hover:border-accent/40 hover:text-foreground"
                     >
                       {p}%
                     </button>
@@ -421,6 +452,21 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
               {insufficient && (
                 <p className="text-[11px] text-negative" role="alert">
                   Insufficient {side === "buy" ? quoteSymbol : baseSymbol} balance for this order.
+                  {side === "buy" && (
+                    <>
+                      {" "}
+                      <Link href="/deposits" className="font-medium underline underline-offset-2">
+                        Fund your account
+                      </Link>{" "}
+                      to continue.
+                    </>
+                  )}
+                </p>
+              )}
+
+              {orderError && (
+                <p className="text-[11px] text-negative" role="alert">
+                  {orderError}
                 </p>
               )}
 
@@ -428,15 +474,23 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
                 variant={side === "buy" ? "positive" : "negative"}
                 size="lg"
                 className="w-full text-sm font-semibold"
-                disabled={!canSubmit}
+                disabled={!canSubmit || submitting}
                 onClick={submit}
               >
-                {side === "buy" ? "Buy" : "Sell"} {baseSymbol}
+                {submitting ? (
+                  <Loader2 className="size-4 animate-spin-slow" aria-hidden />
+                ) : side === "buy" ? (
+                  <ArrowUpRight className="size-4" aria-hidden />
+                ) : (
+                  <ArrowDownRight className="size-4" aria-hidden />
+                )}
+                {submitting ? "Placing order…" : `${side === "buy" ? "Buy" : "Sell"} ${baseSymbol}`}
               </Button>
 
               <p className="flex items-start gap-2 text-[11px] leading-relaxed text-faint">
                 <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                Simulated environment. Orders are not routed to any exchange and no real funds are used.
+                Orders settle against your Quantix wallet with a 0.1% fee. Prices stream from the
+                simulated market feed — no external exchange is used.
               </p>
             </div>
           </div>
@@ -447,8 +501,8 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
       <Dialog
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title="Confirm demo order"
-        description="Review the simulated order. Nothing will be sent to a real exchange."
+        title="Confirm order"
+        description="Review the details — this settles immediately against your wallet."
       >
         <dl className="space-y-2 rounded-xl border border-border bg-surface p-4 text-[13px]">
           {[
@@ -457,7 +511,14 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
             ["Type", orderType === "market" ? "Market" : "Limit"],
             ["Price", formatPrice(limitPrice)],
             ["Amount", `${formatAmount(amount)} ${baseSymbol}`],
+            ["Fee (0.1%)", formatUSD(fee)],
             ["Total incl. fee", formatUSD(total + fee)],
+            [
+              side === "buy" ? `Balance after (${quoteSymbol})` : `Balance after (${baseSymbol})`,
+              side === "buy"
+                ? formatUSD(Math.max(0, quoteBalance - total - fee))
+                : `${formatAmount(Math.max(0, baseBalance - amount))} ${baseSymbol}`,
+            ],
           ].map(([k, v]) => (
             <div key={k} className="flex justify-between">
               <dt className="text-muted">{k}</dt>
@@ -465,17 +526,16 @@ export function TradeContent({ initialCoinId }: { initialCoinId: string }) {
             </div>
           ))}
         </dl>
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-warning/25 bg-warning/10 p-3.5">
-          <Info className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
-          <p className="text-xs leading-relaxed text-warning/90">
-            Demo trading only — this does not create a real or binding order.
-          </p>
-        </div>
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
+          <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button variant={side === "buy" ? "positive" : "negative"} onClick={executeDemoOrder}>
+          <Button
+            variant={side === "buy" ? "positive" : "negative"}
+            onClick={() => void executeOrder()}
+            disabled={submitting}
+          >
+            {submitting && <Loader2 className="size-4 animate-spin-slow" aria-hidden />}
             Confirm {side === "buy" ? "buy" : "sell"}
           </Button>
         </div>

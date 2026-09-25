@@ -19,7 +19,7 @@ import { SENTIMENT } from "@/lib/data/market";
 const STANCE_STYLES: Record<string, string> = {
   bullish: "border-positive/25 bg-positive/10 text-positive",
   bearish: "border-negative/25 bg-negative/10 text-negative",
-  neutral: "border-border bg-white/[0.05] text-muted",
+  neutral: "border-border bg-fill-2 text-muted",
 };
 
 export default function InsightsPage() {
@@ -140,7 +140,7 @@ export default function InsightsPage() {
                     </span>
                     <span className="font-semibold tabular-nums text-foreground">{sig.confidence}%</span>
                   </div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-fill-2">
                     <div
                       className={cn(
                         "h-full rounded-full",
@@ -181,7 +181,7 @@ export default function InsightsPage() {
               <span className="rounded-full border border-positive/20 bg-positive/10 px-2.5 py-1 font-medium text-positive">
                 Expected +{(FORECAST_META.expected * 100).toFixed(1)}%
               </span>
-              <span className="rounded-full border border-border bg-white/[0.04] px-2.5 py-1 font-medium text-muted">
+              <span className="rounded-full border border-border bg-fill-1 px-2.5 py-1 font-medium text-muted">
                 Band {(FORECAST_META.confidenceLow * 100).toFixed(1)}% → +{(FORECAST_META.confidenceHigh * 100).toFixed(1)}%
               </span>
             </div>

@@ -1,10 +1,14 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Quantix design tokens — dark-first institutional fintech theme
+   Quantix design tokens
+   Two full themes (dark + light) and a switchable accent palette.
+   Every surface, border and chart colour is a token so components never
+   hard-code a palette — they only ever reference semantic names.
 --------------------------------------------------------------------------- */
 
 :root {
+  /* ---- dark theme (default) ---- */
   --background: #08090d;
   --surface: #0c0e14;
   --sidebar: #11131a;
@@ -13,55 +17,174 @@
   --overlay: rgba(8, 9, 13, 0.72);
 
   --border: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.14);
 
   --foreground: #f4f6fb;
-  --muted: #8e94a6;
-  --faint: #6b7280;
+  --muted: #98a0b3;
+  --faint: #6f7789;
+
+  /* neutral fills — replace hard-coded white/black overlays */
+  --fill-1: rgba(255, 255, 255, 0.03);
+  --fill-2: rgba(255, 255, 255, 0.06);
+  --fill-3: rgba(255, 255, 255, 0.09);
+  --fill-inverse: #ffffff;
 
   --positive: #34d399;
   --negative: #fb4d5c;
   --warning: #f5a524;
   --info: #38bdf8;
+  --positive-soft: rgba(52, 211, 153, 0.13);
+  --negative-soft: rgba(251, 77, 92, 0.13);
+  --warning-soft: rgba(245, 165, 36, 0.13);
+  --info-soft: rgba(56, 189, 248, 0.13);
 
-  --accent: #8b5cf6;
-  --accent-2: #6366f1;
-  --accent-soft: rgba(139, 92, 246, 0.14);
-  --accent-border: rgba(139, 92, 246, 0.35);
-  --accent-glow: rgba(139, 92, 246, 0.16);
+  --chart-grid: rgba(255, 255, 255, 0.055);
+  --chart-axis: rgba(255, 255, 255, 0.28);
+  --chart-cursor: rgba(255, 255, 255, 0.16);
+  --chart-track: rgba(255, 255, 255, 0.07);
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
   --shadow-pop: 0 12px 40px -8px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3);
+
+  color-scheme: dark;
 }
 
-/* Accent palettes (switchable from Settings → Appearance) */
+/* ------------------------------- light ---------------------------------- */
+
+[data-theme="light"] {
+  --background: #f4f6fb;
+  --surface: #ffffff;
+  --sidebar: #ffffff;
+  --card: #ffffff;
+  --elevated: #ffffff;
+  --overlay: rgba(19, 25, 41, 0.34);
+
+  --border: rgba(16, 24, 40, 0.1);
+  --border-strong: rgba(16, 24, 40, 0.18);
+
+  --foreground: #0f1729;
+  --muted: #5a6479;
+  --faint: #868fa3;
+
+  --fill-1: rgba(16, 24, 40, 0.035);
+  --fill-2: rgba(16, 24, 40, 0.06);
+  --fill-3: rgba(16, 24, 40, 0.1);
+  --fill-inverse: #ffffff;
+
+  --positive: #059669;
+  --negative: #e11d48;
+  --warning: #b45309;
+  --info: #0284c7;
+  --positive-soft: rgba(5, 150, 105, 0.1);
+  --negative-soft: rgba(225, 29, 72, 0.1);
+  --warning-soft: rgba(180, 83, 9, 0.1);
+  --info-soft: rgba(2, 132, 199, 0.1);
+
+  --chart-grid: rgba(16, 24, 40, 0.08);
+  --chart-axis: rgba(16, 24, 40, 0.42);
+  --chart-cursor: rgba(16, 24, 40, 0.22);
+  --chart-track: rgba(16, 24, 40, 0.08);
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05), 0 10px 26px -16px rgba(16, 24, 40, 0.28);
+  --shadow-pop: 0 20px 48px -14px rgba(16, 24, 40, 0.3), 0 0 0 1px rgba(16, 24, 40, 0.07);
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.06);
+
+  color-scheme: light;
+}
+
+/* ------------------------- accent palettes -------------------------------
+   Each accent ships a dark-mode and a light-mode value; light variants are
+   darkened so `text-accent` keeps a readable contrast ratio on white.
+--------------------------------------------------------------------------- */
+
+:root,
 [data-accent="violet"] {
   --accent: #8b5cf6;
   --accent-2: #6366f1;
-  --accent-soft: rgba(139, 92, 246, 0.14);
-  --accent-border: rgba(139, 92, 246, 0.35);
-  --accent-glow: rgba(139, 92, 246, 0.16);
+  --on-accent: #ffffff;
 }
 [data-accent="blue"] {
   --accent: #4f8cff;
   --accent-2: #38bdf8;
-  --accent-soft: rgba(79, 140, 255, 0.14);
-  --accent-border: rgba(79, 140, 255, 0.35);
-  --accent-glow: rgba(79, 140, 255, 0.16);
+  --on-accent: #ffffff;
 }
 [data-accent="emerald"] {
   --accent: #2dd4a7;
   --accent-2: #10b981;
-  --accent-soft: rgba(45, 212, 167, 0.13);
-  --accent-border: rgba(45, 212, 167, 0.32);
-  --accent-glow: rgba(45, 212, 167, 0.15);
+  --on-accent: #04231a;
 }
 [data-accent="amber"] {
   --accent: #f59e0b;
   --accent-2: #f97316;
-  --accent-soft: rgba(245, 158, 11, 0.13);
-  --accent-border: rgba(245, 158, 11, 0.32);
-  --accent-glow: rgba(245, 158, 11, 0.15);
+  --on-accent: #2b1602;
+}
+[data-accent="rose"] {
+  --accent: #fb5d78;
+  --accent-2: #e11d74;
+  --on-accent: #ffffff;
+}
+[data-accent="cyan"] {
+  --accent: #22d3ee;
+  --accent-2: #0ea5e9;
+  --on-accent: #04222b;
+}
+[data-accent="teal"] {
+  --accent: #14b8a6;
+  --accent-2: #0d9488;
+  --on-accent: #03211e;
+}
+[data-accent="fuchsia"] {
+  --accent: #d946ef;
+  --accent-2: #a855f7;
+  --on-accent: #ffffff;
+}
+
+[data-theme="light"][data-accent="violet"] {
+  --accent: #7c3aed;
+  --accent-2: #4f46e5;
+}
+[data-theme="light"][data-accent="blue"] {
+  --accent: #2563eb;
+  --accent-2: #0284c7;
+}
+[data-theme="light"][data-accent="emerald"] {
+  --accent: #059669;
+  --accent-2: #047857;
+  --on-accent: #ffffff;
+}
+[data-theme="light"][data-accent="amber"] {
+  --accent: #d97706;
+  --accent-2: #ea580c;
+  --on-accent: #ffffff;
+}
+[data-theme="light"][data-accent="rose"] {
+  --accent: #e11d48;
+  --accent-2: #be185d;
+  --on-accent: #ffffff;
+}
+[data-theme="light"][data-accent="cyan"] {
+  --accent: #0891b2;
+  --accent-2: #0369a1;
+  --on-accent: #ffffff;
+}
+[data-theme="light"][data-accent="teal"] {
+  --accent: #0d9488;
+  --accent-2: #0f766e;
+  --on-accent: #ffffff;
+}
+[data-theme="light"][data-accent="fuchsia"] {
+  --accent: #c026d3;
+  --accent-2: #9333ea;
+  --on-accent: #ffffff;
+}
+
+/* Accent derivatives — computed from the base so palettes stay in sync */
+:root {
+  --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
+  --accent-border: color-mix(in oklab, var(--accent) 38%, transparent);
+  --accent-glow: color-mix(in oklab, var(--accent) 20%, transparent);
+  --accent-tint: color-mix(in oklab, var(--accent) 8%, transparent);
 }
 
 @theme inline {
@@ -82,6 +205,11 @@
   --color-accent: var(--accent);
   --color-accent-2: var(--accent-2);
   --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+
+  --color-fill-1: var(--fill-1);
+  --color-fill-2: var(--fill-2);
+  --color-fill-3: var(--fill-3);
 
   --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -90,15 +218,18 @@
 
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);
+  --shadow-soft: var(--shadow-soft);
 
   --animate-fade-up: fade-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-fade-in: fade-in 0.4s ease both;
   --animate-scale-in: scale-in 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-slide-in-left: slide-in-left 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-slide-up: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-toast-in: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-shimmer: shimmer 1.8s linear infinite;
   --animate-orbit: orbit 14s linear infinite;
   --animate-pulse-dot: pulse-dot 2.4s ease-in-out infinite;
+  --animate-spin-slow: spin 1.1s linear infinite;
 }
 
 @keyframes fade-up {
@@ -116,6 +247,10 @@
 @keyframes slide-in-left {
   from { opacity: 0.4; transform: translateX(-100%); }
   to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
 }
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(10px) scale(0.97); }
@@ -139,11 +274,14 @@
 html {
   color-scheme: dark;
 }
+html[data-theme="light"] {
+  color-scheme: light;
+}
 
 body {
   background:
     radial-gradient(1100px 520px at 75% -12%, var(--accent-glow), transparent 62%),
-    radial-gradient(900px 420px at -8% 108%, rgba(99, 102, 241, 0.05), transparent 60%),
+    radial-gradient(900px 420px at -8% 108%, color-mix(in oklab, var(--accent-2) 8%, transparent), transparent 60%),
     var(--background);
   background-attachment: fixed;
   color: var(--foreground);
@@ -151,10 +289,11 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   letter-spacing: -0.011em;
+  transition: background-color 0.28s ease, color 0.28s ease;
 }
 
 ::selection {
-  background: var(--accent-soft);
+  background: color-mix(in oklab, var(--accent) 30%, transparent);
   color: var(--foreground);
 }
 
@@ -164,10 +303,10 @@ body {
   border-radius: 6px;
 }
 
-/* Thin, dark scrollbars */
+/* Thin scrollbars that follow the active theme */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: var(--fill-3) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
@@ -177,13 +316,13 @@ body {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--fill-3);
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--border-strong);
   background-clip: content-box;
 }
 
@@ -237,20 +376,23 @@ body {
 }
 
 @utility skeleton-shimmer {
-  background: linear-gradient(
-    100deg,
-    rgba(255, 255, 255, 0.04) 40%,
-    rgba(255, 255, 255, 0.09) 50%,
-    rgba(255, 255, 255, 0.04) 60%
-  );
+  background: linear-gradient(100deg, var(--fill-1) 40%, var(--fill-3) 50%, var(--fill-1) 60%);
   background-size: 200% 100%;
   animation: var(--animate-shimmer);
 }
 
-/* Recharts dark-theme tweaks */
+/* Safe-area padding for notched phones (mobile bottom bars) */
+@utility pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* Recharts theme tweaks */
 .recharts-tooltip-wrapper {
   outline: none !important;
 }
 .recharts-surface {
   overflow: visible;
+}
+.recharts-text {
+  font-size: 11px;
 }
