@@ -1,5 +1,6 @@
 import "server-only";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { seedIfEmpty } from "./seed";
@@ -13,10 +14,40 @@ import { seedIfEmpty } from "./seed";
  *
  * The connection is a module-level singleton so hot reloads in `next dev`
  * don't leak file handles. Set `QUANTIX_DB_PATH` to relocate the database.
+ *
+ * Without `QUANTIX_DB_PATH` the database lives at `data/quantix.db` — but
+ * serverless filesystems (Vercel functions) are read-only outside `/tmp`, so
+ * the resolver below falls back to the OS temp directory there. That fallback
+ * keeps the app running but is **ephemeral** (per instance, gone on cold
+ * start); see README → "Deploying to Vercel".
  */
 
-const DB_PATH =
-  process.env.QUANTIX_DB_PATH ?? path.join(process.cwd(), "data", "quantix.db");
+/**
+ * Picks the SQLite file location. `QUANTIX_DB_PATH` always wins; otherwise try
+ * `data/quantix.db` and fall back to a writable temp file when the working
+ * directory is read-only (the Vercel/`/var/task` case).
+ */
+function resolveDbPath(): string {
+  const explicit = process.env.QUANTIX_DB_PATH;
+  if (explicit) return explicit;
+
+  const local = path.join(process.cwd(), "data", "quantix.db");
+  try {
+    fs.mkdirSync(path.dirname(local), { recursive: true });
+    fs.accessSync(path.dirname(local), fs.constants.W_OK);
+    return local;
+  } catch {
+    // EROFS (or similar): e.g. Vercel lambdas, where only /tmp is writable.
+    const fallback = path.join(os.tmpdir(), "quantix.db");
+    console.warn(
+      `[quantix:db] cannot write to "${path.dirname(local)}" (read-only serverless fs?); ` +
+        `falling back to ephemeral "${fallback}". Set QUANTIX_DB_PATH for persistent storage.`,
+    );
+    return fallback;
+  }
+}
+
+const DB_PATH = resolveDbPath();
 
 declare global {
   var __quantixDb: Database.Database | undefined;

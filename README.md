@@ -39,6 +39,38 @@ The database is created and seeded automatically on first run at `data/quantix.d
 Eight further trader personas are seeded with balances, funding history and ledger entries so the
 console and analytics have something to show. Login cards on `/login` fill these in with one tap.
 
+## Deploying to Vercel
+
+A Vercel deployment needs **no configuration** — but read this before pointing real users at it.
+
+Vercel's function filesystem is **read-only** except `/tmp`, so `data/quantix.db` cannot be created
+at `process.cwd()` (that is the classic `EROFS: read-only file system` failure). `src/lib/server/db.ts`
+probes for a writable location and automatically falls back to `<os tmpdir>/quantix.db` on Vercel,
+logging a warning — the app **runs** out of the box.
+
+What that fallback does **not** give you is persistence:
+
+- `/tmp` is **ephemeral** — it lives only for the lifetime of a warm function instance and is wiped
+  on cold starts. Concurrent instances each get their own database and don't share state.
+- For a demo, preview or review environment this is acceptable (the DB re-seeds itself on first use).
+  For anything real, signups, balances and approvals would silently vanish.
+
+Pick one when you outgrow the demo:
+
+1. **Hosted database (the proper fix).** Point the app at a network database — Turso (libSQL),
+   Neon/Vercel Postgres, etc. — instead of a local file. The schema and service layer stay intact;
+   only `db.ts` changes.
+2. **A host with a persistent disk.** Fly.io, Railway, Render or a plain VPS keep `data/quantix.db`
+   across deploys and restarts; set `QUANTIX_DB_PATH` if you want it outside the app directory.
+
+Two more Vercel notes:
+
+- `better-sqlite3` is a native addon and is compiled from source (`node-gyp`) during
+  `npm install`. Vercel's build image supports this; if the build log ever shows `gyp` errors,
+  make sure the project's Node.js version is a supported LTS (20.x/22.x).
+- The uploaded proof-of-payment blobs already live inside the SQLite file (BLOBs), so no separate
+  upload directory is required — the database story above covers them too.
+
 ## Trader app
 
 | Route | Description |
