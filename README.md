@@ -146,6 +146,23 @@ src/
 - Every sensitive action is written to `activity_logs` with actor, subject, IP, user agent and
   structured metadata.
 
+## Deploying
+
+- `GET /api/health` reports whether the database opened and which file is in use — the fastest way
+  to diagnose a deployment.
+- **Serverless hosts (Vercel, Netlify functions, …):** the project filesystem is read-only there,
+  so the storage layer probes its candidates in order and falls back to the OS temp directory
+  (`/tmp/quantix/quantix.db`). The app boots, seeds and works normally, but that storage is
+  **ephemeral**: every cold start begins from a fresh seed and concurrent instances do not share
+  data. Great for previews and demos, not a production store.
+- To pin the database somewhere specific, set `QUANTIX_DB_PATH` to a writable location (a mounted
+  volume, a persistent disk, …). The same variable relocates the database in local development.
+- `better-sqlite3` is declared in `serverExternalPackages` (`next.config.ts`) so bundlers keep the
+  native binding external and deployable; installs build or fetch the prebuilt binary for the host
+  platform automatically.
+- For a durable multi-instance deployment, run the app on a host with a real filesystem (VPS,
+  container, Fly.io volume, …) or point `QUANTIX_DB_PATH` at shared storage.
+
 ## Design system
 
 - **Dark and light themes** with a full token set per theme (`data-theme` on `<html>`), applied by a

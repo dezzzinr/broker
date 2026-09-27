@@ -1,5 +1,6 @@
 import "server-only";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { seedIfEmpty } from "./seed";
@@ -13,10 +14,23 @@ import { seedIfEmpty } from "./seed";
  *
  * The connection is a module-level singleton so hot reloads in `next dev`
  * don't leak file handles. Set `QUANTIX_DB_PATH` to relocate the database.
+ *
+ * Hosts with a read-only filesystem (Vercel and other serverless platforms
+ * only allow writes inside the temp directory) are handled by probing a list
+ * of candidate locations and falling back to `os.tmpdir()`. Storage there is
+ * ephemeral — the database is re-seeded on every cold start — which is fine
+ * for demos but means such hosts must not be used as the production store.
  */
 
-const DB_PATH =
-  process.env.QUANTIX_DB_PATH ?? path.join(process.cwd(), "data", "quantix.db");
+function candidatePaths(): string[] {
+  const candidates = [
+    process.env.QUANTIX_DB_PATH,
+    path.join(process.cwd(), "data", "quantix.db"),
+    path.join(os.tmpdir(), "quantix", "quantix.db"),
+  ].filter((value): value is string => Boolean(value));
+  // De-duplicate while preserving priority order.
+  return [...new Set(candidates)];
+}
 
 declare global {
   var __quantixDb: Database.Database | undefined;
@@ -189,20 +203,49 @@ CREATE INDEX IF NOT EXISTS idx_attempts         ON login_attempts(identifier, cr
 CREATE INDEX IF NOT EXISTS idx_users_created    ON users(created_at DESC);
 `;
 
-function open(): Database.Database {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  const db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000");
-  db.exec(SCHEMA);
-  return db;
+function openAt(file: string): Database.Database {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const handle = new Database(file);
+  handle.pragma("journal_mode = WAL");
+  handle.pragma("foreign_keys = ON");
+  handle.pragma("busy_timeout = 5000");
+  // Executing the schema doubles as a write probe: on a read-only
+  // filesystem (serverless hosts) this throws here instead of later,
+  // mid-query, so we can fall back to a writable location.
+  handle.exec(SCHEMA);
+  return handle;
 }
+
+function open(): { handle: Database.Database; file: string } {
+  const failures: string[] = [];
+  for (const file of candidatePaths()) {
+    try {
+      return { handle: openAt(file), file };
+    } catch (error) {
+      failures.push(`  - ${file}: ${(error as Error).message}`);
+    }
+  }
+  throw new Error(
+    `Quantix could not open a writable SQLite database. Tried:\n${failures.join(
+      "\n",
+    )}\nSet QUANTIX_DB_PATH to a writable location for this host.`,
+  );
+}
+
+let resolvedFile: string | undefined;
 
 export function db(): Database.Database {
   if (!globalThis.__quantixDb) {
+    const preferred = candidatePaths()[0];
     // Assign before seeding so the seeder resolves the same connection.
-    globalThis.__quantixDb = open();
+    const { handle, file } = open();
+    resolvedFile = file;
+    globalThis.__quantixDb = handle;
+    if (file !== preferred) {
+      console.warn(
+        `[quantix:db] primary database location is not writable, using ${file} (ephemeral on serverless hosts).`,
+      );
+    }
     try {
       seedIfEmpty();
     } catch (error) {
@@ -212,7 +255,11 @@ export function db(): Database.Database {
   return globalThis.__quantixDb;
 }
 
-export const DB_FILE = DB_PATH;
+/** Absolute path of the database file currently in use. */
+export function dbFile(): string {
+  db();
+  return resolvedFile as string;
+}
 
 /** Runs `fn` inside an immediate transaction (better-sqlite3 style). */
 export function transaction<T>(fn: () => T): T {
