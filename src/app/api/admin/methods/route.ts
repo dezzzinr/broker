@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     await requireApiAdmin();
-    return ok({ methods: listMethods(true) });
+    return ok({ methods: await listMethods(true) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     const admin = await requireApiAdmin();
     const meta = await requestMeta();
     const input = await readJson(req, methodSchema);
-    const method = saveMethod(admin, input, meta);
+    const method = await saveMethod(admin, input, meta);
     return ok({ method }, 201);
   } catch (error) {
     return handleApiError(error);

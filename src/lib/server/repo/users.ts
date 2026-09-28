@@ -38,13 +38,13 @@ export interface CreateUserInput {
   kycStatus?: PublicUser["kycStatus"];
 }
 
-export function createUser(input: CreateUserInput): PublicUser {
+export async function createUser(input: CreateUserInput): Promise<PublicUser> {
   const now = new Date().toISOString();
   const id = newId("usr");
   const hue = AVATAR_HUES[Math.floor(Math.random() * AVATAR_HUES.length)];
 
-  transaction(() => {
-    db()
+  await transaction(async () => {
+    await db()
       .prepare(
         `INSERT INTO users
            (id, email, name, password_hash, role, status, kyc_status, phone, country,
@@ -69,33 +69,35 @@ export function createUser(input: CreateUserInput): PublicUser {
     const stmt = db().prepare(
       `INSERT INTO balances (user_id, asset, amount, avg_cost, updated_at) VALUES (?, ?, 0, 0, ?)`
     );
-    for (const asset of assets) stmt.run(id, asset, now);
+    for (const asset of assets) await stmt.run(id, asset, now);
   });
 
-  const user = findById(id);
+  const user = await findById(id);
   if (!user) throw new Error("Failed to create user");
   return user;
 }
 
-export function findById(id: string): PublicUser | null {
-  const row = db().prepare("SELECT * FROM users WHERE id = ?").get(id) as
+export async function findById(id: string): Promise<PublicUser | null> {
+  const row = (await db().prepare("SELECT * FROM users WHERE id = ?").get(id)) as
     | Record<string, unknown>
     | undefined;
   return row ? mapUser(row) : null;
 }
 
-export function findByEmail(email: string): (PublicUser & { passwordHash: string }) | null {
-  const row = db()
+export async function findByEmail(
+  email: string
+): Promise<(PublicUser & { passwordHash: string }) | null> {
+  const row = (await db()
     .prepare("SELECT * FROM users WHERE email = ?")
-    .get(email.toLowerCase().trim()) as Record<string, unknown> | undefined;
+    .get(email.toLowerCase().trim())) as Record<string, unknown> | undefined;
   if (!row) return null;
   return { ...mapUser(row), passwordHash: String(row.password_hash) };
 }
 
-export function emailExists(email: string): boolean {
-  const row = db()
+export async function emailExists(email: string): Promise<boolean> {
+  const row = (await db()
     .prepare("SELECT 1 AS one FROM users WHERE email = ?")
-    .get(email.toLowerCase().trim()) as { one: number } | undefined;
+    .get(email.toLowerCase().trim())) as { one: number } | undefined;
   return Boolean(row);
 }
 
@@ -117,7 +119,9 @@ const SORT_SQL: Record<NonNullable<ListUsersParams["sort"]>, string> = {
   lastLogin: "COALESCE(u.last_login_at, u.created_at)",
 };
 
-export function listUsers(params: ListUsersParams = {}): { rows: AdminUserRow[]; total: number } {
+export async function listUsers(
+  params: ListUsersParams = {}
+): Promise<{ rows: AdminUserRow[]; total: number }> {
   const {
     query = "",
     status = "all",
@@ -131,7 +135,7 @@ export function listUsers(params: ListUsersParams = {}): { rows: AdminUserRow[];
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (query.trim()) {
-    where.push("(u.email LIKE ? OR u.name LIKE ? OR u.id LIKE ?)");
+    where.push("(LOWER(u.email) LIKE LOWER(?) OR LOWER(u.name) LIKE LOWER(?) OR LOWER(u.id) LIKE LOWER(?))");
     const like = `%${query.trim()}%`;
     args.push(like, like, like);
   }
@@ -147,10 +151,12 @@ export function listUsers(params: ListUsersParams = {}): { rows: AdminUserRow[];
   const order = `${SORT_SQL[sort] ?? SORT_SQL.created} ${dir === "asc" ? "ASC" : "DESC"}`;
 
   const total = (
-    db().prepare(`SELECT COUNT(*) AS c FROM users u ${whereSql}`).get(...args) as { c: number }
+    (await db().prepare(`SELECT COUNT(*) AS c FROM users u ${whereSql}`).get(...args)) as {
+      c: number;
+    }
   ).c;
 
-  const rows = db()
+  const rows = (await db()
     .prepare(
       `SELECT u.*,
               COALESCE((SELECT SUM(b.amount * CASE WHEN b.asset IN ('USD','USDT') THEN 1 ELSE 0 END)
@@ -170,13 +176,13 @@ export function listUsers(params: ListUsersParams = {}): { rows: AdminUserRow[];
         ORDER BY ${order}
         LIMIT ? OFFSET ?`
     )
-    .all(...args, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
+    .all(...args, pageSize, (page - 1) * pageSize)) as Record<string, unknown>[];
 
   return { rows: rows.map(toAdminRow), total };
 }
 
-export function getAdminUser(id: string): AdminUserRow | null {
-  const row = db()
+export async function getAdminUser(id: string): Promise<AdminUserRow | null> {
+  const row = (await db()
     .prepare(
       `SELECT u.*,
               COALESCE((SELECT SUM(b.amount * CASE WHEN b.asset IN ('USD','USDT') THEN 1 ELSE 0 END)
@@ -193,7 +199,7 @@ export function getAdminUser(id: string): AdminUserRow | null {
                 AS last_activity_at
          FROM users u WHERE u.id = ?`
     )
-    .get(id) as Record<string, unknown> | undefined;
+    .get(id)) as Record<string, unknown> | undefined;
   return row ? toAdminRow(row) : null;
 }
 
@@ -219,7 +225,7 @@ export interface UpdateUserPatch {
   twoFactor?: boolean;
 }
 
-export function updateUser(id: string, patch: UpdateUserPatch): PublicUser | null {
+export async function updateUser(id: string, patch: UpdateUserPatch): Promise<PublicUser | null> {
   const sets: string[] = ["updated_at = ?"];
   const args: (string | number | null)[] = [new Date().toISOString()];
 
@@ -256,37 +262,37 @@ export function updateUser(id: string, patch: UpdateUserPatch): PublicUser | nul
     args.push(patch.twoFactor ? 1 : 0);
   }
   args.push(id);
-  db().prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+  await db().prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...args);
   return findById(id);
 }
 
-export function setPassword(id: string, password: string): void {
-  db()
+export async function setPassword(id: string, password: string): Promise<void> {
+  await db()
     .prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?")
     .run(hashPassword(password), new Date().toISOString(), id);
 }
 
-export function recordLogin(id: string, ip: string): void {
-  db()
+export async function recordLogin(id: string, ip: string): Promise<void> {
+  await db()
     .prepare("UPDATE users SET last_login_at = ?, last_login_ip = ? WHERE id = ?")
     .run(new Date().toISOString(), ip.slice(0, 64), id);
 }
 
-export function deleteUser(id: string): void {
-  transaction(() => {
-    db().prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
-    db().prepare("DELETE FROM balances WHERE user_id = ?").run(id);
-    db().prepare("DELETE FROM notifications WHERE user_id = ?").run(id);
-    db().prepare("DELETE FROM transactions WHERE user_id = ?").run(id);
-    db().prepare("DELETE FROM fund_requests WHERE user_id = ?").run(id);
-    db().prepare("UPDATE activity_logs SET user_id = NULL WHERE user_id = ?").run(id);
-    db().prepare("DELETE FROM users WHERE id = ?").run(id);
+export async function deleteUser(id: string): Promise<void> {
+  await transaction(async () => {
+    await db().prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+    await db().prepare("DELETE FROM balances WHERE user_id = ?").run(id);
+    await db().prepare("DELETE FROM notifications WHERE user_id = ?").run(id);
+    await db().prepare("DELETE FROM transactions WHERE user_id = ?").run(id);
+    await db().prepare("DELETE FROM fund_requests WHERE user_id = ?").run(id);
+    await db().prepare("UPDATE activity_logs SET user_id = NULL WHERE user_id = ?").run(id);
+    await db().prepare("DELETE FROM users WHERE id = ?").run(id);
   });
 }
 
-export function countAdmins(): number {
-  const row = db()
+export async function countAdmins(): Promise<number> {
+  const row = (await db()
     .prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND status = 'active'")
-    .get() as { c: number };
+    .get()) as { c: number };
   return row.c;
 }

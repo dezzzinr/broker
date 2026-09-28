@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     await requireApiAdmin();
-    return ok({ announcements: listAnnouncements({ includeUnpublished: true }) });
+    return ok({ announcements: await listAnnouncements({ includeUnpublished: true }) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -37,11 +37,11 @@ export async function POST(req: Request) {
     const input = await readJson(req, postSchema);
 
     if (input.intent === "broadcast") {
-      const reached = broadcastMessage(admin, input, meta);
+      const reached = await broadcastMessage(admin, input, meta);
       return ok({ reached }, 201);
     }
 
-    const announcement = publishAnnouncement(admin, input, meta);
+    const announcement = await publishAnnouncement(admin, input, meta);
     return ok({ announcement }, 201);
   } catch (error) {
     return handleApiError(error);
@@ -56,7 +56,7 @@ export async function DELETE(req: Request) {
     const meta = await requestMeta();
     const id = new URL(req.url).searchParams.get("id");
     if (!id) return ok({ deleted: false });
-    removeAnnouncement(admin, id, meta);
+    await removeAnnouncement(admin, id, meta);
     return ok({ deleted: true });
   } catch (error) {
     return handleApiError(error);

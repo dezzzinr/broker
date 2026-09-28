@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     await requireApiAdmin();
     const url = new URL(req.url);
 
-    const result = listActivity({
+    const result = await listActivity({
       userId: url.searchParams.get("userId") ?? undefined,
       category: (url.searchParams.get("category") ?? "all") as ActivityCategory | "all",
       action: url.searchParams.get("action") ?? undefined,
@@ -25,7 +25,7 @@ export async function GET(req: Request) {
       pageSize: Math.min(100, Math.max(10, Number(url.searchParams.get("pageSize") ?? 25))),
     });
 
-    return ok({ ...result, actions: listActivityActions() });
+    return ok({ ...result, actions: await listActivityActions() });
   } catch (error) {
     return handleApiError(error);
   }

@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     if (!limit.allowed) throw tooMany("Too many sign-in attempts. Please wait a few minutes.");
 
     const input = await readJson(req, loginSchema);
-    const { user, token, expiresAt } = signIn(input.email, input.password, meta);
+    const { user, token, expiresAt } = await signIn(input.email, input.password, meta);
 
     const res = NextResponse.json({
       ok: true,

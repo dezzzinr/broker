@@ -14,8 +14,8 @@ export async function GET() {
   try {
     const user = await requireApiUser();
     return ok({
-      notifications: listNotifications(user.id, 15),
-      unread: unreadCount(user.id),
+      notifications: await listNotifications(user.id, 15),
+      unread: await unreadCount(user.id),
     });
   } catch (error) {
     return handleApiError(error);
@@ -34,10 +34,10 @@ export async function POST(req: Request) {
     const user = await requireApiUser();
     const input = await readJson(req, patchSchema);
 
-    if (input.all) markAllRead(user.id);
-    else if (input.id) markRead(input.id, user.id);
+    if (input.all) await markAllRead(user.id);
+    else if (input.id) await markRead(input.id, user.id);
 
-    return ok({ unread: unreadCount(user.id) });
+    return ok({ unread: await unreadCount(user.id) });
   } catch (error) {
     return handleApiError(error);
   }

@@ -1,5 +1,5 @@
 import "server-only";
-import { db } from "../db";
+import { db, transaction } from "../db";
 import { newId } from "../ids";
 import type { Announcement, PlatformSettings } from "@/lib/types/platform";
 
@@ -45,8 +45,8 @@ function coerce(key: keyof PlatformSettings, raw: string): string | number | boo
   return raw;
 }
 
-export function getPlatformSettings(): PlatformSettings {
-  const rows = db().prepare("SELECT key, value FROM app_settings").all() as {
+export async function getPlatformSettings(): Promise<PlatformSettings> {
+  const rows = (await db().prepare("SELECT key, value FROM app_settings").all()) as {
     key: string;
     value: string;
   }[];
@@ -59,51 +59,51 @@ export function getPlatformSettings(): PlatformSettings {
   return settings;
 }
 
-export function updatePlatformSettings(
+export async function updatePlatformSettings(
   patch: Partial<PlatformSettings>
-): PlatformSettings {
+): Promise<PlatformSettings> {
   const now = new Date().toISOString();
-  const stmt = db().prepare(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-  );
-  db().transaction(() => {
+  await transaction(async () => {
+    const stmt = db().prepare(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+    );
     for (const [key, value] of Object.entries(patch)) {
       const column = COLUMN_MAP[key as keyof PlatformSettings];
       if (!column || value === undefined) continue;
       const raw = typeof value === "boolean" ? (value ? "1" : "0") : String(value);
-      stmt.run(column, raw, now);
+      await stmt.run(column, raw, now);
     }
-  })();
+  });
   return getPlatformSettings();
 }
 
 /* ------------------------------ announcements --------------------------- */
 
-export function listAnnouncements(
+export async function listAnnouncements(
   opts: { includeUnpublished?: boolean; limit?: number } = {}
-): Announcement[] {
-  const rows = db()
+): Promise<Announcement[]> {
+  const rows = (await db()
     .prepare(
       `SELECT * FROM announcements
         ${opts.includeUnpublished ? "" : "WHERE published = 1"}
         ORDER BY pinned DESC, created_at DESC
         LIMIT ?`
     )
-    .all(opts.limit ?? 50) as Record<string, unknown>[];
+    .all(opts.limit ?? 50)) as Record<string, unknown>[];
   return rows.map(mapAnnouncement);
 }
 
-export function createAnnouncement(input: {
+export async function createAnnouncement(input: {
   title: string;
   body: string;
   tag?: string;
   pinned?: boolean;
   published?: boolean;
-}): Announcement {
+}): Promise<Announcement> {
   const now = new Date().toISOString();
   const id = newId("ann");
-  db()
+  await db()
     .prepare(
       `INSERT INTO announcements (id, title, body, tag, pinned, published, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -117,18 +117,18 @@ export function createAnnouncement(input: {
       input.published === false ? 0 : 1,
       now
     );
-  return getAnnouncement(id)!;
+  return (await getAnnouncement(id))!;
 }
 
-export function getAnnouncement(id: string): Announcement | null {
-  const row = db().prepare("SELECT * FROM announcements WHERE id = ?").get(id) as
+export async function getAnnouncement(id: string): Promise<Announcement | null> {
+  const row = (await db().prepare("SELECT * FROM announcements WHERE id = ?").get(id)) as
     | Record<string, unknown>
     | undefined;
   return row ? mapAnnouncement(row) : null;
 }
 
-export function deleteAnnouncement(id: string): void {
-  db().prepare("DELETE FROM announcements WHERE id = ?").run(id);
+export async function deleteAnnouncement(id: string): Promise<void> {
+  await db().prepare("DELETE FROM announcements WHERE id = ?").run(id);
 }
 
 function mapAnnouncement(row: Record<string, unknown>): Announcement {
@@ -144,28 +144,28 @@ function mapAnnouncement(row: Record<string, unknown>): Announcement {
 }
 
 /** Broadcasts a notification to every active account (used by announcements). */
-export function broadcast(input: {
+export async function broadcast(input: {
   title: string;
   body?: string;
   kind?: "info" | "success" | "warning" | "error";
   href?: string | null;
   roles?: ("user" | "admin")[];
-}): number {
-  const users = db()
+}): Promise<number> {
+  const users = (await db()
     .prepare(
       `SELECT id FROM users WHERE status = 'active'${
         input.roles && input.roles.length ? ` AND role IN (${input.roles.map(() => "?").join(",")})` : ""
       }`
     )
-    .all(...(input.roles ?? [])) as { id: string }[];
+    .all(...(input.roles ?? []))) as { id: string }[];
   const now = new Date().toISOString();
-  const stmt = db().prepare(
-    `INSERT INTO notifications (id, user_id, title, body, kind, href, read, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`
-  );
-  db().transaction(() => {
+  await transaction(async () => {
+    const stmt = db().prepare(
+      `INSERT INTO notifications (id, user_id, title, body, kind, href, read, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?)`
+    );
     for (const user of users) {
-      stmt.run(
+      await stmt.run(
         newId("ntf"),
         user.id,
         input.title,
@@ -175,6 +175,6 @@ export function broadcast(input: {
         now
       );
     }
-  })();
+  });
   return users.length;
 }

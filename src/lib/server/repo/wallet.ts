@@ -12,10 +12,10 @@ import type { Balance } from "@/lib/types/platform";
 
 const QUOTE_ASSETS = new Set(["USD", "USDT"]);
 
-export function getBalances(userId: string): Balance[] {
-  const rows = db()
+export async function getBalances(userId: string): Promise<Balance[]> {
+  const rows = (await db()
     .prepare("SELECT * FROM balances WHERE user_id = ? ORDER BY asset ASC")
-    .all(userId) as Record<string, unknown>[];
+    .all(userId)) as Record<string, unknown>[];
   return rows.map((r) => ({
     asset: String(r.asset),
     amount: Number(r.amount),
@@ -24,10 +24,10 @@ export function getBalances(userId: string): Balance[] {
   }));
 }
 
-export function getBalance(userId: string, asset: string): Balance | null {
-  const row = db()
+export async function getBalance(userId: string, asset: string): Promise<Balance | null> {
+  const row = (await db()
     .prepare("SELECT * FROM balances WHERE user_id = ? AND asset = ?")
-    .get(userId, asset) as Record<string, unknown> | undefined;
+    .get(userId, asset)) as Record<string, unknown> | undefined;
   if (!row) return null;
   return {
     asset: String(row.asset),
@@ -37,18 +37,18 @@ export function getBalance(userId: string, asset: string): Balance | null {
   };
 }
 
-export function getAmount(userId: string, asset: string): number {
-  return getBalance(userId, asset)?.amount ?? 0;
+export async function getAmount(userId: string, asset: string): Promise<number> {
+  return (await getBalance(userId, asset))?.amount ?? 0;
 }
 
-function upsert(
+async function upsert(
   userId: string,
   asset: string,
   amount: number,
   avgCost: number,
   now = new Date().toISOString()
-): void {
-  db()
+): Promise<void> {
+  await db()
     .prepare(
       `INSERT INTO balances (user_id, asset, amount, avg_cost, updated_at)
        VALUES (?, ?, ?, ?, ?)
@@ -61,15 +61,15 @@ function upsert(
 }
 
 /** Adds funds, blending the average cost basis for non-quote assets. */
-export function credit(
+export async function credit(
   userId: string,
   asset: string,
   amount: number,
   unitCost?: number
-): Balance {
+): Promise<Balance> {
   if (amount <= 0) throw new Error("credit amount must be positive");
   const now = new Date().toISOString();
-  const current = getBalance(userId, asset) ?? {
+  const current = (await getBalance(userId, asset)) ?? {
     asset,
     amount: 0,
     avgCost: 0,
@@ -85,14 +85,14 @@ export function credit(
   } else if (QUOTE_ASSETS.has(asset)) {
     nextAvg = 1;
   }
-  upsert(userId, asset, nextAmount, nextAvg, now);
+  await upsert(userId, asset, nextAmount, nextAvg, now);
   return { asset, amount: nextAmount, avgCost: nextAvg, updatedAt: now };
 }
 
 /** Removes funds. Throws when the wallet cannot cover the amount. */
-export function debit(userId: string, asset: string, amount: number): Balance {
+export async function debit(userId: string, asset: string, amount: number): Promise<Balance> {
   if (amount <= 0) throw new Error("debit amount must be positive");
-  const current = getBalance(userId, asset);
+  const current = await getBalance(userId, asset);
   const held = current?.amount ?? 0;
   if (held + 1e-9 < amount) {
     throw new Error(`Insufficient ${asset} balance`);
@@ -100,34 +100,34 @@ export function debit(userId: string, asset: string, amount: number): Balance {
   const now = new Date().toISOString();
   const nextAmount = Math.max(0, held - amount);
   const nextAvg = nextAmount === 0 ? 0 : (current?.avgCost ?? 0);
-  upsert(userId, asset, nextAmount, nextAvg, now);
+  await upsert(userId, asset, nextAmount, nextAvg, now);
   return { asset, amount: nextAmount, avgCost: nextAvg, updatedAt: now };
 }
 
 /** Admin override — sets an exact balance (used by "adjust balance"). */
-export function setBalance(
+export async function setBalance(
   userId: string,
   asset: string,
   amount: number,
   avgCost?: number
-): Balance {
+): Promise<Balance> {
   const now = new Date().toISOString();
-  const current = getBalance(userId, asset);
+  const current = await getBalance(userId, asset);
   const cost =
     avgCost !== undefined
       ? avgCost
       : QUOTE_ASSETS.has(asset)
         ? 1
         : (current?.avgCost ?? 0);
-  upsert(userId, asset, Math.max(0, amount), cost, now);
+  await upsert(userId, asset, Math.max(0, amount), cost, now);
   return { asset, amount: Math.max(0, amount), avgCost: cost, updatedAt: now };
 }
 
-export function ensureAssets(userId: string, assets: string[]): void {
+export async function ensureAssets(userId: string, assets: string[]): Promise<void> {
   const now = new Date().toISOString();
-  transaction(() => {
+  await transaction(async () => {
     for (const asset of assets) {
-      db()
+      await db()
         .prepare(
           `INSERT INTO balances (user_id, asset, amount, avg_cost, updated_at)
            VALUES (?, ?, 0, ?, ?)
@@ -139,7 +139,7 @@ export function ensureAssets(userId: string, assets: string[]): void {
 }
 
 /** Executes a spot trade atomically: quote out/in, base in/out, ledger entry. */
-export function executeTrade(input: {
+export async function executeTrade(input: {
   userId: string;
   side: "buy" | "sell";
   baseAsset: string;
@@ -148,41 +148,36 @@ export function executeTrade(input: {
   price: number;
   fee: number;
   note?: string;
-}): { txId: string; base: Balance; quote: Balance } {
+}): Promise<{ txId: string; base: Balance; quote: Balance }> {
   const { userId, side, baseAsset, quoteAsset, baseAmount, price, fee, note } = input;
   if (baseAmount <= 0 || price <= 0) throw new Error("Invalid order size");
 
   const gross = baseAmount * price;
   const txId = `tx_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
-  transaction(() => {
-    let base: Balance;
-    let quote: Balance;
+  await transaction(async () => {
     if (side === "buy") {
       const needed = gross + fee;
-      const held = getAmount(userId, quoteAsset);
+      const held = await getAmount(userId, quoteAsset);
       if (held + 1e-9 < needed) {
         throw new Error(
           `Insufficient ${quoteAsset} balance — you need ${needed.toFixed(2)} but hold ${held.toFixed(2)}`
         );
       }
-      debit(userId, quoteAsset, needed);
-      base = credit(userId, baseAsset, baseAmount, price);
-      quote = getBalance(userId, quoteAsset)!;
+      await debit(userId, quoteAsset, needed);
+      await credit(userId, baseAsset, baseAmount, price);
     } else {
-      const held = getAmount(userId, baseAsset);
+      const held = await getAmount(userId, baseAsset);
       if (held + 1e-9 < baseAmount) {
         throw new Error(
           `Insufficient ${baseAsset} balance — you hold ${held.toFixed(6)}`
         );
       }
-      debit(userId, baseAsset, baseAmount);
-      credit(userId, quoteAsset, gross - fee);
-      base = getBalance(userId, baseAsset)!;
-      quote = getBalance(userId, quoteAsset)!;
+      await debit(userId, baseAsset, baseAmount);
+      await credit(userId, quoteAsset, gross - fee);
     }
 
-    db()
+    await db()
       .prepare(
         `INSERT INTO transactions (id, user_id, type, asset, amount, price, fee, status, note, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?)`
@@ -198,14 +193,12 @@ export function executeTrade(input: {
         note ?? `${side === "buy" ? "Bought" : "Sold"} ${baseAmount} ${baseAsset}`,
         new Date().toISOString()
       );
-
-    return { base, quote };
   });
 
   return {
     txId,
-    base: getBalance(userId, baseAsset)!,
-    quote: getBalance(userId, quoteAsset)!,
+    base: (await getBalance(userId, baseAsset))!,
+    quote: (await getBalance(userId, quoteAsset))!,
   };
 }
 

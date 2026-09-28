@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     const coin = getCoinById(input.coinId);
     if (!coin) throw notFound("Unknown market.");
 
-    const result = placeOrder(
+    const result = await placeOrder(
       user,
       {
         coin,

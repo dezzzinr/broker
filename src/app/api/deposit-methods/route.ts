@@ -11,9 +11,9 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const user = await requireApiUser();
-    const platform = getPlatformSettings();
+    const platform = await getPlatformSettings();
     return ok({
-      methods: listMethods(false),
+      methods: await listMethods(false),
       limits: {
         minDeposit: platform.minDeposit,
         maxDeposit: platform.maxDeposit,

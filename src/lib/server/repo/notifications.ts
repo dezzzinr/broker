@@ -13,10 +13,10 @@ export interface PushNotificationInput {
   href?: string | null;
 }
 
-export function pushNotification(input: PushNotificationInput): AppNotification {
+export async function pushNotification(input: PushNotificationInput): Promise<AppNotification> {
   const now = new Date().toISOString();
   const id = newId("ntf");
-  db()
+  await db()
     .prepare(
       `INSERT INTO notifications (id, user_id, title, body, kind, href, read, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 0, ?)`
@@ -31,7 +31,7 @@ export function pushNotification(input: PushNotificationInput): AppNotification 
       now
     );
   // Keep the table bounded — 100 most recent per user is plenty for the bell.
-  db()
+  await db()
     .prepare(
       `DELETE FROM notifications
         WHERE user_id = ? AND id NOT IN (
@@ -39,40 +39,43 @@ export function pushNotification(input: PushNotificationInput): AppNotification 
         )`
     )
     .run(input.userId, input.userId);
-  return getNotification(id)!;
+  return (await getNotification(id))!;
 }
 
-export function getNotification(id: string): AppNotification | null {
-  const row = db().prepare("SELECT * FROM notifications WHERE id = ?").get(id) as
+export async function getNotification(id: string): Promise<AppNotification | null> {
+  const row = (await db().prepare("SELECT * FROM notifications WHERE id = ?").get(id)) as
     | Record<string, unknown>
     | undefined;
   return row ? mapNotification(row) : null;
 }
 
-export function listNotifications(userId: string, limit = 20): AppNotification[] {
-  const rows = db()
+export async function listNotifications(userId: string, limit = 20): Promise<AppNotification[]> {
+  const rows = (await db()
     .prepare(
       `SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
     )
-    .all(userId, limit) as Record<string, unknown>[];
+    .all(userId, limit)) as Record<string, unknown>[];
   return rows.map(mapNotification);
 }
 
-export function unreadCount(userId: string): number {
-  const row = db()
+export async function unreadCount(userId: string): Promise<number> {
+  const row = (await db()
     .prepare("SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND read = 0")
-    .get(userId) as { c: number };
+    .get(userId)) as { c: number };
   return row.c;
 }
 
-export function markRead(id: string, userId: string): void {
-  db().prepare("UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?").run(id, userId);
+export async function markRead(id: string, userId: string): Promise<void> {
+  await db()
+    .prepare("UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?")
+    .run(id, userId);
 }
 
-export function markAllRead(userId: string): number {
-  return db()
+export async function markAllRead(userId: string): Promise<number> {
+  const info = await db()
     .prepare("UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0")
-    .run(userId).changes;
+    .run(userId);
+  return info.changes;
 }
 
 function mapNotification(row: Record<string, unknown>): AppNotification {

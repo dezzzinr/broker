@@ -10,7 +10,7 @@ export async function GET(req: Request) {
     await requireApiAdmin();
     const url = new URL(req.url);
 
-    const result = listLedger({
+    const result = await listLedger({
       userId: url.searchParams.get("userId") ?? undefined,
       type: (url.searchParams.get("type") ?? "all") as LedgerType | "all",
       query: url.searchParams.get("q") ?? "",

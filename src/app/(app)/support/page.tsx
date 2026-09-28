@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic";
 
 export default async function SupportPage() {
   await requireUser();
-  const platform = getPlatformSettings();
-  const announcements = listAnnouncements({ limit: 12 });
+  const platform = await getPlatformSettings();
+  const announcements = await listAnnouncements({ limit: 12 });
 
   return (
     <SupportManager announcements={announcements} supportEmail={platform.supportEmail} />

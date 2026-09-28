@@ -17,7 +17,7 @@ export async function GET() {
     const { user, token } = await getSessionUserWithToken();
     if (!user) throw unauthorized();
     const currentId = token ? hashToken(token) : null;
-    const sessions = listSessions(user.id).map((s) => ({
+    const sessions = (await listSessions(user.id)).map((s) => ({
       ...s,
       current: s.id === currentId,
     }));
@@ -35,7 +35,7 @@ export async function DELETE(req: Request) {
     const { user, token } = await getSessionUserWithToken();
     if (!user) throw unauthorized();
 
-    const revoked = destroyAllSessions(user.id, token ?? undefined);
+    const revoked = await destroyAllSessions(user.id, token ?? undefined);
     activity.logActivity({
       actionKey: "sessionRevoked",
       userId: user.id,

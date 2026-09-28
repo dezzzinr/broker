@@ -18,12 +18,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await getSessionUser();
   if (!user) redirect("/login?next=/dashboard");
 
-  const platform = getPlatformSettings();
+  const platform = await getPlatformSettings();
   const pending =
-    user.role === "admin" ? countPending("deposit") + countPending("withdrawal") : 0;
+    user.role === "admin" ? await countPending("deposit") + await countPending("withdrawal") : 0;
 
   return (
-    <SessionProvider user={user} unread={unreadCount(user.id)} pendingReviews={pending}>
+    <SessionProvider user={user} unread={await unreadCount(user.id)} pendingReviews={pending}>
       <WalletProvider>
         <AppShell maintenance={{ active: platform.maintenanceMode, message: platform.maintenanceMessage }}>
           {children}

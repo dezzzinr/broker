@@ -69,11 +69,16 @@ function receiptSvg(opts: {
 </svg>`;
 }
 
-export function seedIfEmpty(): boolean {
-  const existing = db().prepare("SELECT COUNT(*) AS c FROM users").get() as { c: number };
-  if (existing.c > 0) return false;
+export async function seedIfEmpty(): Promise<boolean> {
+  return transaction(async () => {
+    // Serialise first-run seeding across concurrent instances (advisory lock
+    // on Postgres; BEGIN IMMEDIATE on SQLite) and re-check inside the lock.
+    await db().lock("quantix:seed");
+    const existing = (await db().prepare("SELECT COUNT(*) AS c FROM users").get()) as {
+      c: number;
+    };
+    if (existing.c > 0) return false;
 
-  transaction(() => {
     const rand = rng(20260924);
     const now = new Date().toISOString();
     const insertUser = db().prepare(
@@ -109,7 +114,7 @@ export function seedIfEmpty(): boolean {
 
     /* ------------------------------- accounts ---------------------------- */
     const adminId = newId("usr");
-    insertUser.run(
+    await insertUser.run(
       adminId,
       SEED_CREDENTIALS.admin.email,
       SEED_CREDENTIALS.admin.name,
@@ -128,7 +133,7 @@ export function seedIfEmpty(): boolean {
     );
 
     const demoId = newId("usr");
-    insertUser.run(
+    await insertUser.run(
       demoId,
       SEED_CREDENTIALS.user.email,
       SEED_CREDENTIALS.user.name,
@@ -158,10 +163,10 @@ export function seedIfEmpty(): boolean {
     ];
 
     const userIds: string[] = [demoId];
-    people.forEach((p, i) => {
+    for (const [i, p] of people.entries()) {
       const id = newId("usr");
       userIds.push(id);
-      insertUser.run(
+      await insertUser.run(
         id,
         p.email,
         p.name,
@@ -178,7 +183,7 @@ export function seedIfEmpty(): boolean {
         iso(Math.floor(rand() * 72 + 1) * HOUR),
         `${192 + (i % 4)}.0.2.${10 + i}`
       );
-    });
+    }
 
     /* ---------------------------- deposit methods ------------------------ */
     const methods = [
@@ -278,7 +283,7 @@ export function seedIfEmpty(): boolean {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const m of methods) {
-      insertMethod.run(
+      await insertMethod.run(
         m.id,
         m.name,
         m.kind,
@@ -310,27 +315,27 @@ export function seedIfEmpty(): boolean {
       ["SOL", 58.21, 121.35],
     ];
     for (const [asset, amount, cost] of demoWallet) {
-      insertBalance.run(demoId, asset, amount, cost, now);
+      await insertBalance.run(demoId, asset, amount, cost, now);
     }
 
-    userIds.slice(1).forEach((id, i) => {
+    for (const [i, id] of userIds.slice(1).entries()) {
       const cash = Math.round((400 + rand() * 18_000) * 100) / 100;
-      insertBalance.run(id, "USD", cash, 1, now);
-      insertBalance.run(id, "USDT", Math.round(rand() * 3_000 * 100) / 100, 1, now);
+      await insertBalance.run(id, "USD", cash, 1, now);
+      await insertBalance.run(id, "USDT", Math.round(rand() * 3_000 * 100) / 100, 1, now);
       if (i % 2 === 0) {
-        insertBalance.run(id, "BTC", Number((rand() * 0.6).toFixed(4)), 68_400 + rand() * 6_000, now);
+        await insertBalance.run(id, "BTC", Number((rand() * 0.6).toFixed(4)), 68_400 + rand() * 6_000, now);
       }
       if (i % 3 === 0) {
-        insertBalance.run(id, "ETH", Number((rand() * 6).toFixed(4)), 2_100 + rand() * 400, now);
+        await insertBalance.run(id, "ETH", Number((rand() * 6).toFixed(4)), 2_100 + rand() * 400, now);
       }
       if (i % 4 === 1) {
-        insertBalance.run(id, "SOL", Number((rand() * 80).toFixed(2)), 110 + rand() * 40, now);
+        await insertBalance.run(id, "SOL", Number((rand() * 80).toFixed(2)), 110 + rand() * 40, now);
       }
-    });
+    }
 
     /* --------------------------- fund requests --------------------------- */
     let fundSeq = 0;
-    const addFund = (opts: {
+    const addFund = async (opts: {
       userId: string;
       methodIndex: number;
       amount: number;
@@ -349,9 +354,9 @@ export function seedIfEmpty(): boolean {
       const reference = `${m.referencePrefix}-${String(48_210 + fundSeq * 37).slice(0, 6)}`;
       fundSeq += 1;
       const submitted = iso(opts.submittedAgo);
-      const user = db()
+      const user = (await db()
         .prepare("SELECT name FROM users WHERE id = ?")
-        .get(opts.userId) as { name: string };
+        .get(opts.userId)) as { name: string };
       const proof =
         opts.withProof === false
           ? null
@@ -366,7 +371,7 @@ export function seedIfEmpty(): boolean {
               }),
               "utf8"
             );
-      insertFund.run(
+      await insertFund.run(
         id,
         opts.userId,
         opts.kind ?? "deposit",
@@ -394,9 +399,9 @@ export function seedIfEmpty(): boolean {
     };
 
     // Approved history (already reflected in seeded balances)
-    addFund({ userId: demoId, methodIndex: 0, amount: 15_000, status: "approved", submittedAgo: 62 * DAY, reviewedAgo: 62 * DAY - 2 * HOUR, withProof: true, reviewNote: "Matched bank statement MD-88213." });
-    addFund({ userId: demoId, methodIndex: 1, amount: 4_200, status: "approved", submittedAgo: 21 * DAY, reviewedAgo: 21 * DAY - HOUR, withProof: true, reviewNote: "TRC-20 hash verified on-chain." });
-    addFund({ userId: demoId, methodIndex: 2, amount: 750, status: "rejected", submittedAgo: 9 * DAY, reviewedAgo: 9 * DAY - 3 * HOUR, withProof: true, reviewNote: "Sender name does not match the account holder. Refunded to the mobile wallet." });
+    await addFund({ userId: demoId, methodIndex: 0, amount: 15_000, status: "approved", submittedAgo: 62 * DAY, reviewedAgo: 62 * DAY - 2 * HOUR, withProof: true, reviewNote: "Matched bank statement MD-88213." });
+    await addFund({ userId: demoId, methodIndex: 1, amount: 4_200, status: "approved", submittedAgo: 21 * DAY, reviewedAgo: 21 * DAY - HOUR, withProof: true, reviewNote: "TRC-20 hash verified on-chain." });
+    await addFund({ userId: demoId, methodIndex: 2, amount: 750, status: "rejected", submittedAgo: 9 * DAY, reviewedAgo: 9 * DAY - 3 * HOUR, withProof: true, reviewNote: "Sender name does not match the account holder. Refunded to the mobile wallet." });
 
     // Pending queue for the admin to work through
     const pending = [
@@ -407,16 +412,17 @@ export function seedIfEmpty(): boolean {
       { userId: demoId, methodIndex: 0, amount: 5_000, submittedAgo: 1.4 * HOUR, note: "Same-day wire from my business account." },
       { userId: userIds[8], methodIndex: 1, amount: 980, submittedAgo: 26 * HOUR },
     ];
-    const pendingIds = pending.map((p) =>
-      addFund({ ...p, status: "pending", withProof: true })
-    );
+    const pendingIds: string[] = [];
+    for (const p of pending) {
+      pendingIds.push(await addFund({ ...p, status: "pending", withProof: true }));
+    }
 
     // One pending request with a missing attachment — exercises the review UI
-    addFund({ userId: userIds[3], methodIndex: 0, amount: 4_750, status: "pending", submittedAgo: 5 * HOUR, withProof: false, note: "Proof upload failed twice, sending by email." });
+    await addFund({ userId: userIds[3], methodIndex: 0, amount: 4_750, status: "pending", submittedAgo: 5 * HOUR, withProof: false, note: "Proof upload failed twice, sending by email." });
 
     // Approved deposits for the other demo accounts
-    userIds.slice(1, 6).forEach((id, i) => {
-      addFund({
+    for (const [i, id] of userIds.slice(1, 6).entries()) {
+      await addFund({
         userId: id,
         methodIndex: i % methods.length,
         amount: Math.round((1_500 + rand() * 22_000) / 10) * 10,
@@ -426,11 +432,11 @@ export function seedIfEmpty(): boolean {
         withProof: true,
         reviewNote: "Verified against bank statement.",
       });
-    });
+    }
 
     // Withdrawal requests (pending + settled)
-    addFund({ userId: userIds[2], methodIndex: 0, amount: 3_200, status: "pending", submittedAgo: 9 * HOUR, withProof: false, kind: "withdrawal", note: "Paying out to my registered bank account." });
-    addFund({ userId: demoId, methodIndex: 0, amount: 1_500, status: "approved", submittedAgo: 14 * DAY, reviewedAgo: 14 * DAY - 5 * HOUR, withProof: false, kind: "withdrawal", reviewNote: "Wire sent, MT103 available on request." });
+    await addFund({ userId: userIds[2], methodIndex: 0, amount: 3_200, status: "pending", submittedAgo: 9 * HOUR, withProof: false, kind: "withdrawal", note: "Paying out to my registered bank account." });
+    await addFund({ userId: demoId, methodIndex: 0, amount: 1_500, status: "approved", submittedAgo: 14 * DAY, reviewedAgo: 14 * DAY - 5 * HOUR, withProof: false, kind: "withdrawal", reviewNote: "Wire sent, MT103 available on request." });
 
     /* -------------------------------- ledger ----------------------------- */
     const tradeAssets = ["BTC", "ETH", "SOL"];
@@ -441,7 +447,7 @@ export function seedIfEmpty(): boolean {
         const buy = rand() > 0.42;
         const amount = Number((rand() * (asset === "BTC" ? 0.25 : asset === "ETH" ? 3 : 40) + 0.001).toFixed(4));
         const price = priceOf(asset) * (0.86 + rand() * 0.24);
-        insertTx.run(
+        await insertTx.run(
           newId("tx"),
           userId,
           buy ? "buy" : "sell",
@@ -458,13 +464,13 @@ export function seedIfEmpty(): boolean {
     }
 
     // Deposit/withdrawal ledger entries mirroring the approved fund requests
-    const approvedFunds = db()
+    const approvedFunds = (await db()
       .prepare(
         `SELECT * FROM fund_requests WHERE status = 'approved' ORDER BY submitted_at ASC`
       )
-      .all() as Record<string, unknown>[];
+      .all()) as Record<string, unknown>[];
     for (const f of approvedFunds) {
-      insertTx.run(
+      await insertTx.run(
         newId("tx"),
         String(f.user_id),
         String(f.kind) === "deposit" ? "deposit" : "withdrawal",
@@ -480,7 +486,7 @@ export function seedIfEmpty(): boolean {
     }
 
     /* --------------------------- activity stream ------------------------- */
-    const activity = (opts: {
+    const activity = async (opts: {
       userId: string;
       actorId?: string;
       action: string;
@@ -493,7 +499,7 @@ export function seedIfEmpty(): boolean {
       ago: number;
       ip?: string;
     }) =>
-      insertActivity.run(
+      await insertActivity.run(
         newId("act"),
         opts.userId,
         opts.actorId ?? opts.userId,
@@ -513,7 +519,7 @@ export function seedIfEmpty(): boolean {
     for (const userId of userIds) {
       const logins = 3 + Math.floor(rand() * 8);
       for (let i = 0; i < logins; i++) {
-        activity({
+        await activity({
           userId,
           action: "auth.login",
           category: "auth",
@@ -524,12 +530,12 @@ export function seedIfEmpty(): boolean {
       }
     }
 
-    activity({ userId: adminId, action: "auth.signup", category: "auth", summary: "Administrator account provisioned", severity: "success", ago: 120 * DAY });
-    activity({ userId: demoId, action: "auth.signup", category: "auth", summary: "Account created", severity: "success", ago: 96 * DAY });
+    await activity({ userId: adminId, action: "auth.signup", category: "auth", summary: "Administrator account provisioned", severity: "success", ago: 120 * DAY });
+    await activity({ userId: demoId, action: "auth.signup", category: "auth", summary: "Account created", severity: "success", ago: 96 * DAY });
 
     // Fund request lifecycle events
-    approvedFunds.forEach((f, i) => {
-      activity({
+    for (const [i, f] of approvedFunds.entries()) {
+      await activity({
         userId: String(f.user_id),
         action: "deposit.submitted",
         category: "deposit",
@@ -540,7 +546,7 @@ export function seedIfEmpty(): boolean {
         meta: { amount: Number(f.amount), method: f.method_name, reference: f.reference },
         ago: Math.floor((Date.now() - new Date(String(f.submitted_at)).getTime()) / 1000) * 1000,
       });
-      activity({
+      await activity({
         userId: String(f.user_id),
         actorId: adminId,
         action: "deposit.approved",
@@ -552,12 +558,12 @@ export function seedIfEmpty(): boolean {
         meta: { amount: Number(f.credit), reference: f.reference, reviewer: SEED_CREDENTIALS.admin.name },
         ago: Math.max(1000, Math.floor((Date.now() - new Date(String(f.reviewed_at ?? f.submitted_at)).getTime()) / 1000) * 1000),
       });
-      if (i === 0) return;
-    });
+      if (i === 0) continue;
+    }
 
-    pendingIds.forEach((id) => {
-      const f = db().prepare("SELECT * FROM fund_requests WHERE id = ?").get(id) as Record<string, unknown>;
-      activity({
+    for (const id of pendingIds) {
+      const f = (await db().prepare("SELECT * FROM fund_requests WHERE id = ?").get(id)) as Record<string, unknown>;
+      await activity({
         userId: String(f.user_id),
         action: "deposit.submitted",
         category: "deposit",
@@ -568,24 +574,24 @@ export function seedIfEmpty(): boolean {
         meta: { amount: Number(f.amount), method: f.method_name, reference: f.reference, status: "pending" },
         ago: Math.floor((Date.now() - new Date(String(f.submitted_at)).getTime()) / 1000) * 1000,
       });
-    });
+    }
 
-    activity({ userId: userIds[3], actorId: adminId, action: "admin.user_status", category: "admin", summary: "Account suspended — chargeback risk flagged by payments team", severity: "warning", entityType: "user", entityId: userIds[3], ago: 2 * DAY, ip: "203.0.113.9" });
-    activity({ userId: demoId, action: "trade.executed", category: "trade", summary: "Bought 0.042 BTC at market", severity: "success", entityType: "order", ago: 5 * HOUR });
-    activity({ userId: demoId, action: "account.password_changed", category: "security", summary: "Password changed", severity: "critical", ago: 12 * DAY });
-    activity({ userId: userIds[7], action: "auth.login_failed", category: "security", summary: "Failed sign-in — incorrect password (3 attempts)", severity: "warning", ago: 30 * 60_000 });
-    activity({ userId: userIds[1], action: "account.profile_updated", category: "account", summary: "Updated phone number", severity: "info", ago: 3 * DAY });
-    activity({ userId: adminId, actorId: adminId, action: "admin.method_created", category: "admin", summary: "Created deposit method “Mobile money”", severity: "info", entityType: "method", ago: 44 * DAY, ip: "203.0.113.9" });
-    activity({ userId: adminId, actorId: adminId, action: "admin.settings_updated", category: "admin", summary: "Raised maximum deposit to $50,000", severity: "info", ago: 9 * DAY, ip: "203.0.113.9" });
+    await activity({ userId: userIds[3], actorId: adminId, action: "admin.user_status", category: "admin", summary: "Account suspended — chargeback risk flagged by payments team", severity: "warning", entityType: "user", entityId: userIds[3], ago: 2 * DAY, ip: "203.0.113.9" });
+    await activity({ userId: demoId, action: "trade.executed", category: "trade", summary: "Bought 0.042 BTC at market", severity: "success", entityType: "order", ago: 5 * HOUR });
+    await activity({ userId: demoId, action: "account.password_changed", category: "security", summary: "Password changed", severity: "critical", ago: 12 * DAY });
+    await activity({ userId: userIds[7], action: "auth.login_failed", category: "security", summary: "Failed sign-in — incorrect password (3 attempts)", severity: "warning", ago: 30 * 60_000 });
+    await activity({ userId: userIds[1], action: "account.profile_updated", category: "account", summary: "Updated phone number", severity: "info", ago: 3 * DAY });
+    await activity({ userId: adminId, actorId: adminId, action: "admin.method_created", category: "admin", summary: "Created deposit method “Mobile money”", severity: "info", entityType: "method", ago: 44 * DAY, ip: "203.0.113.9" });
+    await activity({ userId: adminId, actorId: adminId, action: "admin.settings_updated", category: "admin", summary: "Raised maximum deposit to $50,000", severity: "info", ago: 9 * DAY, ip: "203.0.113.9" });
 
     /* ---------------------------- notifications -------------------------- */
-    insertNotification.run(newId("ntf"), demoId, "Deposit approved", "Your $4,200.00 USDT deposit has been credited to your USD account.", "success", "/wallet", 0, iso(21 * DAY));
-    insertNotification.run(newId("ntf"), demoId, "Deposit rejected", "We could not match your $750.00 mobile money payment. The funds were returned to your wallet.", "error", "/deposits", 0, iso(9 * DAY));
-    insertNotification.run(newId("ntf"), demoId, "Deposit under review", "Your $5,000.00 bank transfer is queued for verification.", "warning", "/deposits", 0, iso(1.4 * HOUR));
-    insertNotification.run(newId("ntf"), demoId, "Maintenance window on Sunday", "Analytics engine upgrade, 02:00–03:00 UTC. Trading stays online.", "info", "/support", 1, iso(2 * DAY));
-    insertNotification.run(newId("ntf"), demoId, "New beta: correlation matrix", "Available now in Analytics.", "info", "/support", 1, iso(4 * DAY));
+    await insertNotification.run(newId("ntf"), demoId, "Deposit approved", "Your $4,200.00 USDT deposit has been credited to your USD account.", "success", "/wallet", 0, iso(21 * DAY));
+    await insertNotification.run(newId("ntf"), demoId, "Deposit rejected", "We could not match your $750.00 mobile money payment. The funds were returned to your wallet.", "error", "/deposits", 0, iso(9 * DAY));
+    await insertNotification.run(newId("ntf"), demoId, "Deposit under review", "Your $5,000.00 bank transfer is queued for verification.", "warning", "/deposits", 0, iso(1.4 * HOUR));
+    await insertNotification.run(newId("ntf"), demoId, "Maintenance window on Sunday", "Analytics engine upgrade, 02:00–03:00 UTC. Trading stays online.", "info", "/support", 1, iso(2 * DAY));
+    await insertNotification.run(newId("ntf"), demoId, "New beta: correlation matrix", "Available now in Analytics.", "info", "/support", 1, iso(4 * DAY));
     for (const id of userIds.slice(1)) {
-      insertNotification.run(newId("ntf"), id, "Welcome to Quantix", "Complete your first deposit to start trading.", "info", "/deposits", 0, iso(2 * DAY));
+      await insertNotification.run(newId("ntf"), id, "Welcome to Quantix", "Complete your first deposit to start trading.", "info", "/deposits", 0, iso(2 * DAY));
     }
 
     /* ---------------------------- announcements -------------------------- */
@@ -593,10 +599,10 @@ export function seedIfEmpty(): boolean {
       `INSERT INTO announcements (id, title, body, tag, pinned, published, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
-    insertAnnouncement.run(newId("ann"), "Maintenance window on Sunday", "We are upgrading the analytics engine between 02:00 and 03:00 UTC on Sunday. Trading, deposits and withdrawals stay online; historical charts may be briefly unavailable.", "maintenance", 1, 1, iso(2 * DAY));
-    insertAnnouncement.run(newId("ann"), "Manual deposits now support mobile money", "Mobile money payouts are matched within 30 minutes during business hours. Always attach your confirmation screenshot so we can credit you faster.", "feature", 0, 1, iso(6 * DAY));
-    insertAnnouncement.run(newId("ann"), "New beta: correlation matrix", "Analytics now ships a 30-day correlation matrix across your holdings. Enable it from Analytics → Beta features.", "beta", 0, 1, iso(4 * DAY));
-    insertAnnouncement.run(newId("ann"), "Enhanced account security", "Two-factor authentication and session history are live for every account. We recommend enabling 2FA before your next deposit.", "security", 0, 1, iso(11 * DAY));
+    await insertAnnouncement.run(newId("ann"), "Maintenance window on Sunday", "We are upgrading the analytics engine between 02:00 and 03:00 UTC on Sunday. Trading, deposits and withdrawals stay online; historical charts may be briefly unavailable.", "maintenance", 1, 1, iso(2 * DAY));
+    await insertAnnouncement.run(newId("ann"), "Manual deposits now support mobile money", "Mobile money payouts are matched within 30 minutes during business hours. Always attach your confirmation screenshot so we can credit you faster.", "feature", 0, 1, iso(6 * DAY));
+    await insertAnnouncement.run(newId("ann"), "New beta: correlation matrix", "Analytics now ships a 30-day correlation matrix across your holdings. Enable it from Analytics → Beta features.", "beta", 0, 1, iso(4 * DAY));
+    await insertAnnouncement.run(newId("ann"), "Enhanced account security", "Two-factor authentication and session history are live for every account. We recommend enabling 2FA before your next deposit.", "security", 0, 1, iso(11 * DAY));
 
     /* -------------------------- platform settings ------------------------ */
     const insertSetting = db().prepare(
@@ -614,8 +620,8 @@ export function seedIfEmpty(): boolean {
       ["maintenance_mode", "0"],
       ["maintenance_message", "We are upgrading our matching engine. Deposits are paused briefly."],
     ];
-    for (const [key, value] of settings) insertSetting.run(key, value, now);
-  });
+    for (const [key, value] of settings) await await insertSetting.run(key, value, now);
 
-  return true;
+    return true;
+  });
 }

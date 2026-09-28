@@ -69,7 +69,7 @@ const SELECT_WITH_USER = `
     LEFT JOIN users r ON r.id = f.reviewed_by
     LEFT JOIN deposit_methods m ON m.id = f.method_id`;
 
-export function createFundRequest(input: CreateFundInput): FundRequest {
+export async function createFundRequest(input: CreateFundInput): Promise<FundRequest> {
   const now = new Date().toISOString();
   const id = newId(input.kind === "deposit" ? "dep" : "wdr");
   const fee = Math.max(0, input.fee ?? 0);
@@ -78,7 +78,7 @@ export function createFundRequest(input: CreateFundInput): FundRequest {
     input.reference?.trim() ||
     newReference(input.kind === "deposit" ? "DEP" : "WDR");
 
-  db()
+  await db()
     .prepare(
       `INSERT INTO fund_requests
         (id, user_id, kind, method_id, method_name, asset, amount, fee, credit, status,
@@ -107,13 +107,13 @@ export function createFundRequest(input: CreateFundInput): FundRequest {
       now
     );
 
-  return getFundRequest(id)!;
+  return (await getFundRequest(id))!;
 }
 
-export function getFundRequest(id: string): FundRequest | null {
-  const row = db()
+export async function getFundRequest(id: string): Promise<FundRequest | null> {
+  const row = (await db()
     .prepare(`${SELECT_WITH_USER} WHERE f.id = ?`)
-    .get(id) as Record<string, unknown> | undefined;
+    .get(id)) as Record<string, unknown> | undefined;
   return row ? map(row) : null;
 }
 
@@ -126,9 +126,9 @@ export interface ListFundsParams {
   pageSize?: number;
 }
 
-export function listFundRequests(
+export async function listFundRequests(
   params: ListFundsParams = {}
-): { rows: FundRequest[]; total: number; pendingValue: number } {
+): Promise<{ rows: FundRequest[]; total: number; pendingValue: number }> {
   const { userId, kind = "all", status = "all", query = "", page = 1, pageSize = 20 } = params;
   const where: string[] = [];
   const args: (string | number)[] = [];
@@ -146,36 +146,38 @@ export function listFundRequests(
     args.push(status);
   }
   if (query.trim()) {
-    where.push("(f.reference LIKE ? OR u.name LIKE ? OR u.email LIKE ? OR f.method_name LIKE ?)");
+    where.push(
+      "(LOWER(f.reference) LIKE LOWER(?) OR LOWER(u.name) LIKE LOWER(?) OR LOWER(u.email) LIKE LOWER(?) OR LOWER(f.method_name) LIKE LOWER(?))"
+    );
     const like = `%${query.trim()}%`;
     args.push(like, like, like, like);
   }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
   const total = (
-    db()
+    (await db()
       .prepare(
         `SELECT COUNT(*) AS c FROM fund_requests f JOIN users u ON u.id = f.user_id ${whereSql}`
       )
-      .get(...args) as { c: number }
+      .get(...args)) as { c: number }
   ).c;
 
-  const rows = db()
+  const rows = (await db()
     .prepare(
       `${SELECT_WITH_USER} ${whereSql}
         ORDER BY CASE f.status WHEN 'pending' THEN 0 ELSE 1 END, f.submitted_at DESC
         LIMIT ? OFFSET ?`
     )
-    .all(...args, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
+    .all(...args, pageSize, (page - 1) * pageSize)) as Record<string, unknown>[];
 
   const pendingValue = (
-    db()
+    (await db()
       .prepare(
         `SELECT COALESCE(SUM(f.amount), 0) AS v
            FROM fund_requests f JOIN users u ON u.id = f.user_id
           ${where.length ? `WHERE ${where.join(" AND ")} AND` : "WHERE"} f.status = 'pending'`
       )
-      .get(...args) as { v: number }
+      .get(...args)) as { v: number }
   ).v;
 
   return { rows: rows.map(map), total, pendingValue };
@@ -199,17 +201,17 @@ export interface ReviewResult {
  * Approval credits the user's wallet and writes a ledger entry — all inside a
  * single transaction so a request can never be approved twice.
  */
-export function reviewFundRequest(input: ReviewInput): ReviewResult {
+export async function reviewFundRequest(input: ReviewInput): Promise<ReviewResult> {
   const now = new Date().toISOString();
-  const result = transaction<ReviewResult>(() => {
-    const row = db()
+  return transaction<ReviewResult>(async () => {
+    const row = (await db()
       .prepare("SELECT * FROM fund_requests WHERE id = ?")
-      .get(input.requestId) as Record<string, unknown> | undefined;
+      .get(input.requestId)) as Record<string, unknown> | undefined;
     if (!row) throw new Error("Request not found");
     if (row.status !== "pending") throw new Error("This request has already been processed");
 
     const amount = Number(row.credit || row.amount);
-    const updated = db()
+    const updated = await db()
       .prepare(
         `UPDATE fund_requests
             SET status = ?, reviewed_at = ?, reviewed_by = ?, review_note = ?
@@ -224,9 +226,9 @@ export function reviewFundRequest(input: ReviewInput): ReviewResult {
     // request was raised, so approval only settles the existing ledger entry.
     if (input.decision === "approved" && row.kind === "deposit") {
       const asset = String(row.asset ?? "USD");
-      wallet.credit(String(row.user_id), asset, amount);
+      await wallet.credit(String(row.user_id), asset, amount);
       transactionId = `tx_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-      db()
+      await db()
         .prepare(
           `INSERT INTO transactions (id, user_id, type, asset, amount, price, fee, status, note, ref_id, created_at)
            VALUES (?, ?, ?, ?, ?, 1, ?, 'completed', ?, ?, ?)`
@@ -245,19 +247,21 @@ export function reviewFundRequest(input: ReviewInput): ReviewResult {
     }
 
     return {
-      request: getFundRequest(input.requestId)!,
+      request: (await getFundRequest(input.requestId))!,
       creditedAmount: input.decision === "approved" ? amount : 0,
       transactionId,
     };
   });
-
-  return result;
 }
 
-export function getProof(id: string): { data: Buffer; mime: string; name: string } | null {
-  const row = db()
+export async function getProof(
+  id: string
+): Promise<{ data: Buffer; mime: string; name: string } | null> {
+  const row = (await db()
     .prepare("SELECT proof, proof_mime, proof_name FROM fund_requests WHERE id = ?")
-    .get(id) as { proof: Buffer | null; proof_mime: string | null; proof_name: string | null } | undefined;
+    .get(id)) as
+    | { proof: Buffer | null; proof_mime: string | null; proof_name: string | null }
+    | undefined;
   if (!row?.proof) return null;
   return {
     data: Buffer.from(row.proof),
@@ -266,8 +270,8 @@ export function getProof(id: string): { data: Buffer; mime: string; name: string
   };
 }
 
-export function cancelFundRequest(id: string, userId: string): boolean {
-  const info = db()
+export async function cancelFundRequest(id: string, userId: string): Promise<boolean> {
+  const info = await db()
     .prepare(
       `UPDATE fund_requests SET status = 'cancelled', reviewed_at = ?, review_note = 'Cancelled by user'
         WHERE id = ? AND user_id = ? AND status = 'pending'`
@@ -276,9 +280,9 @@ export function cancelFundRequest(id: string, userId: string): boolean {
   return info.changes > 0;
 }
 
-export function countPending(kind: FundKind = "deposit"): number {
-  const row = db()
+export async function countPending(kind: FundKind = "deposit"): Promise<number> {
+  const row = (await db()
     .prepare("SELECT COUNT(*) AS c FROM fund_requests WHERE status = 'pending' AND kind = ?")
-    .get(kind) as { c: number };
+    .get(kind)) as { c: number };
   return row.c;
 }

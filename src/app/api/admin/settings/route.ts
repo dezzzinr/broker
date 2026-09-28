@@ -11,8 +11,8 @@ export async function GET() {
   try {
     await requireApiAdmin();
     return ok({
-      settings: getPlatformSettings(),
-      announcements: listAnnouncements({ includeUnpublished: true }),
+      settings: await getPlatformSettings(),
+      announcements: await listAnnouncements({ includeUnpublished: true }),
     });
   } catch (error) {
     return handleApiError(error);
@@ -26,7 +26,7 @@ export async function PATCH(req: Request) {
     const admin = await requireApiAdmin();
     const meta = await requestMeta();
     const patch = await readJson(req, platformSettingsSchema);
-    const settings = savePlatformSettings(admin, patch, meta);
+    const settings = await savePlatformSettings(admin, patch, meta);
     return ok({ settings });
   } catch (error) {
     return handleApiError(error);

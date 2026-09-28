@@ -12,9 +12,9 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const user = await requireApiUser();
-    const balances = getBalances(user.id);
-    const ledger = listLedger({ userId: user.id, pageSize: 12 });
-    const funds = listFundRequests({ userId: user.id, pageSize: 8 });
+    const balances = await getBalances(user.id);
+    const ledger = await listLedger({ userId: user.id, pageSize: 12 });
+    const funds = await listFundRequests({ userId: user.id, pageSize: 8 });
 
     return ok({
       balances,

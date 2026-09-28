@@ -133,8 +133,12 @@ if (typeof setInterval !== "undefined" && !(globalThis as { __qxSweeper?: boolea
 }
 
 /** Records a login attempt and reports whether the identifier is locked out. */
-export function registerLoginAttempt(identifier: string, ip: string, success: boolean): void {
-  db()
+export async function registerLoginAttempt(
+  identifier: string,
+  ip: string,
+  success: boolean
+): Promise<void> {
+  await db()
     .prepare(
       `INSERT INTO login_attempts (id, identifier, ip, success, created_at)
        VALUES (?, ?, ?, ?, ?)`
@@ -148,18 +152,23 @@ export function registerLoginAttempt(identifier: string, ip: string, success: bo
     );
 }
 
-export function loginLockout(identifier: string, ip: string, windowMinutes = 15, max = 8): {
+export async function loginLockout(
+  identifier: string,
+  ip: string,
+  windowMinutes = 15,
+  max = 8
+): Promise<{
   locked: boolean;
   retryAfter: number;
-} {
+}> {
   const since = new Date(Date.now() - windowMinutes * 60_000).toISOString();
-  const row = db()
+  const row = (await db()
     .prepare(
       `SELECT COUNT(*) AS failures, MAX(created_at) AS latest
          FROM login_attempts
         WHERE (identifier = ? OR ip = ?) AND success = 0 AND created_at > ?`
     )
-    .get(identifier.toLowerCase(), ip, since) as { failures: number; latest: string | null };
+    .get(identifier.toLowerCase(), ip, since)) as { failures: number; latest: string | null };
 
   if (row.failures < max) return { locked: false, retryAfter: 0 };
   const latest = row.latest ? new Date(row.latest).getTime() : Date.now();
@@ -170,8 +179,8 @@ export function loginLockout(identifier: string, ip: string, windowMinutes = 15,
   return { locked: true, retryAfter };
 }
 
-export function clearLoginAttempts(identifier: string): void {
-  db()
+export async function clearLoginAttempts(identifier: string): Promise<void> {
+  await db()
     .prepare("DELETE FROM login_attempts WHERE identifier = ?")
     .run(identifier.toLowerCase());
 }

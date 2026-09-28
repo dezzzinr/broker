@@ -44,28 +44,28 @@ function map(row: Record<string, unknown>): DepositMethod {
   };
 }
 
-export function listMethods(includeDisabled = false): DepositMethod[] {
-  const rows = db()
+export async function listMethods(includeDisabled = false): Promise<DepositMethod[]> {
+  const rows = (await db()
     .prepare(
       `SELECT * FROM deposit_methods
         ${includeDisabled ? "" : "WHERE enabled = 1"}
         ORDER BY sort_order ASC, name ASC`
     )
-    .all() as Record<string, unknown>[];
+    .all()) as Record<string, unknown>[];
   return rows.map(map);
 }
 
-export function getMethod(id: string): DepositMethod | null {
-  const row = db().prepare("SELECT * FROM deposit_methods WHERE id = ?").get(id) as
+export async function getMethod(id: string): Promise<DepositMethod | null> {
+  const row = (await db().prepare("SELECT * FROM deposit_methods WHERE id = ?").get(id)) as
     | Record<string, unknown>
     | undefined;
   return row ? map(row) : null;
 }
 
-export function createMethod(input: MethodInput): DepositMethod {
+export async function createMethod(input: MethodInput): Promise<DepositMethod> {
   const now = new Date().toISOString();
   const id = newId("mth");
-  db()
+  await db()
     .prepare(
       `INSERT INTO deposit_methods
         (id, name, kind, currency, instructions, account_name, account_number, bank_name,
@@ -92,10 +92,13 @@ export function createMethod(input: MethodInput): DepositMethod {
       now,
       now
     );
-  return getMethod(id)!;
+  return (await getMethod(id))!;
 }
 
-export function updateMethod(id: string, patch: Partial<MethodInput>): DepositMethod | null {
+export async function updateMethod(
+  id: string,
+  patch: Partial<MethodInput>
+): Promise<DepositMethod | null> {
   const sets: string[] = ["updated_at = ?"];
   const args: (string | number)[] = [new Date().toISOString()];
   const columns: Record<string, keyof MethodInput> = {
@@ -125,17 +128,17 @@ export function updateMethod(id: string, patch: Partial<MethodInput>): DepositMe
     args.push(patch.enabled ? 1 : 0);
   }
   args.push(id);
-  db().prepare(`UPDATE deposit_methods SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+  await db().prepare(`UPDATE deposit_methods SET ${sets.join(", ")} WHERE id = ?`).run(...args);
   return getMethod(id);
 }
 
-export function deleteMethod(id: string): void {
-  db().prepare("DELETE FROM deposit_methods WHERE id = ?").run(id);
+export async function deleteMethod(id: string): Promise<void> {
+  await db().prepare("DELETE FROM deposit_methods WHERE id = ?").run(id);
 }
 
-export function countEnabledMethods(): number {
-  const row = db()
+export async function countEnabledMethods(): Promise<number> {
+  const row = (await db()
     .prepare("SELECT COUNT(*) AS c FROM deposit_methods WHERE enabled = 1")
-    .get() as { c: number };
+    .get()) as { c: number };
   return row.c;
 }

@@ -30,7 +30,7 @@ export interface SubmitDepositInput {
   proof: { data: Buffer; mime: string; name: string } | null;
 }
 
-export function getEnabledMethods(): DepositMethod[] {
+export async function getEnabledMethods(): Promise<DepositMethod[]> {
   return methods.listMethods(false);
 }
 
@@ -39,13 +39,13 @@ export function calculateFee(method: DepositMethod, amount: number) {
   return { fee, credit: Math.round((amount - fee) * 100) / 100 };
 }
 
-export function submitDeposit(
+export async function submitDeposit(
   user: SessionUser,
   input: SubmitDepositInput,
   meta: RequestMeta
-): FundRequest {
-  const platform = settingsRepo.getPlatformSettings();
-  const method = methods.getMethod(input.methodId);
+): Promise<FundRequest> {
+  const platform = await settingsRepo.getPlatformSettings();
+  const method = await methods.getMethod(input.methodId);
 
   if (!method || !method.enabled) {
     throw new ApiError(400, "That deposit method is no longer available.", {
@@ -72,12 +72,14 @@ export function submitDeposit(
     );
   }
 
-  const pendingCount = funds.listFundRequests({
-    userId: user.id,
-    kind: "deposit",
-    status: "pending",
-    pageSize: 50,
-  }).total;
+  const pendingCount = (
+    await funds.listFundRequests({
+      userId: user.id,
+      kind: "deposit",
+      status: "pending",
+      pageSize: 50,
+    })
+  ).total;
   if (pendingCount >= 5) {
     throw new ApiError(
       429,
@@ -87,7 +89,7 @@ export function submitDeposit(
 
   const { fee, credit } = calculateFee(method, input.amount);
 
-  const request = funds.createFundRequest({
+  const request = await funds.createFundRequest({
     userId: user.id,
     kind: "deposit",
     methodId: method.id,
@@ -101,7 +103,7 @@ export function submitDeposit(
     proof: input.proof,
   });
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "depositSubmitted",
     userId: user.id,
     summary: `Submitted a ${money(request.amount)} deposit via ${method.name}`,
@@ -119,7 +121,7 @@ export function submitDeposit(
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId: user.id,
     title: "Deposit submitted for review",
     body: `${money(request.amount)} via ${method.name} · reference ${request.reference}. Our team reviews deposits ${method.processingTime.toLowerCase()}.`,
@@ -127,7 +129,7 @@ export function submitDeposit(
     href: "/deposits",
   });
 
-  notifyAdmins({
+  await notifyAdmins({
     title: "New deposit awaiting review",
     body: `${user.name} submitted ${money(request.amount)} via ${method.name} (${request.reference}).`,
     href: "/admin/deposits",
@@ -136,7 +138,7 @@ export function submitDeposit(
 
   // Optional fast-path: administrators can auto-credit small deposits.
   if (platform.autoApproveBelow > 0 && request.amount <= platform.autoApproveBelow) {
-    const admin = findSystemReviewer();
+    const admin = await findSystemReviewer();
     if (admin) {
       return approveDeposit(
         admin,
@@ -161,32 +163,32 @@ export interface Reviewer {
   email?: string;
 }
 
-function findSystemReviewer(): Reviewer | null {
-  const row = db()
+async function findSystemReviewer(): Promise<Reviewer | null> {
+  const row = (await db()
     .prepare("SELECT id, name, email FROM users WHERE role = 'admin' AND status = 'active' LIMIT 1")
-    .get() as { id: string; name: string; email: string } | undefined;
+    .get()) as { id: string; name: string; email: string } | undefined;
   return row ?? null;
 }
 
-export function approveDeposit(
+export async function approveDeposit(
   reviewer: Reviewer,
   requestId: string,
   meta: RequestMeta,
   note = ""
-): FundRequest {
-  const before = funds.getFundRequest(requestId);
+): Promise<FundRequest> {
+  const before = await funds.getFundRequest(requestId);
   if (!before) throw new ApiError(404, "Deposit request not found.");
   if (before.status !== "pending")
     throw new ApiError(409, `This request was already ${before.status}.`);
 
-  const result = funds.reviewFundRequest({
+  const result = await funds.reviewFundRequest({
     requestId,
     reviewerId: reviewer.id,
     decision: "approved",
     note,
   });
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: before.kind === "deposit" ? "depositApproved" : "withdrawalApproved",
     userId: before.userId,
     actorId: reviewer.id,
@@ -205,7 +207,7 @@ export function approveDeposit(
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId: before.userId,
     title:
       before.kind === "deposit"
@@ -222,13 +224,13 @@ export function approveDeposit(
   return result.request;
 }
 
-export function rejectDeposit(
+export async function rejectDeposit(
   reviewer: Reviewer,
   requestId: string,
   meta: RequestMeta,
   note: string
-): FundRequest {
-  const before = funds.getFundRequest(requestId);
+): Promise<FundRequest> {
+  const before = await funds.getFundRequest(requestId);
   if (!before) throw new ApiError(404, "Request not found.");
   if (before.status !== "pending")
     throw new ApiError(409, `This request was already ${before.status}.`);
@@ -237,7 +239,7 @@ export function rejectDeposit(
       note: "A rejection reason is required.",
     });
 
-  const result = funds.reviewFundRequest({
+  const result = await funds.reviewFundRequest({
     requestId,
     reviewerId: reviewer.id,
     decision: "rejected",
@@ -246,9 +248,9 @@ export function rejectDeposit(
 
   // Withdrawals escrow funds at submission — refund them when rejected.
   if (before.kind === "withdrawal") {
-    transaction(() => {
-      wallet.credit(before.userId, before.asset, before.amount);
-      db()
+    await transaction(async () => {
+      await wallet.credit(before.userId, before.asset, before.amount);
+      await db()
         .prepare(
           `UPDATE transactions SET status = 'failed', note = ? WHERE ref_id = ? AND type = 'withdrawal'`
         )
@@ -256,7 +258,7 @@ export function rejectDeposit(
     });
   }
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: before.kind === "deposit" ? "depositRejected" : "withdrawalRejected",
     userId: before.userId,
     actorId: reviewer.id,
@@ -268,7 +270,7 @@ export function rejectDeposit(
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId: before.userId,
     title:
       before.kind === "deposit"
@@ -282,19 +284,23 @@ export function rejectDeposit(
   return result.request;
 }
 
-export function cancelDeposit(user: SessionUser, requestId: string, meta: RequestMeta): void {
-  const request = funds.getFundRequest(requestId);
+export async function cancelDeposit(
+  user: SessionUser,
+  requestId: string,
+  meta: RequestMeta
+): Promise<void> {
+  const request = await funds.getFundRequest(requestId);
   if (!request || request.userId !== user.id) throw new ApiError(404, "Request not found.");
   if (request.status !== "pending")
     throw new ApiError(409, `This request was already ${request.status}.`);
 
-  const cancelled = funds.cancelFundRequest(requestId, user.id);
+  const cancelled = await funds.cancelFundRequest(requestId, user.id);
   if (!cancelled) throw new ApiError(409, "This request could not be cancelled.");
 
   if (request.kind === "withdrawal") {
-    transaction(() => {
-      wallet.credit(user.id, request.asset, request.amount);
-      db()
+    await transaction(async () => {
+      await wallet.credit(user.id, request.asset, request.amount);
+      await db()
         .prepare(
           `UPDATE transactions SET status = 'failed', note = ? WHERE ref_id = ? AND type = 'withdrawal'`
         )
@@ -302,7 +308,7 @@ export function cancelDeposit(user: SessionUser, requestId: string, meta: Reques
     });
   }
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "depositCancelled",
     userId: user.id,
     summary: `Cancelled ${request.kind} ${request.reference} (${money(request.amount)})`,
@@ -315,19 +321,19 @@ export function cancelDeposit(user: SessionUser, requestId: string, meta: Reques
 
 /* ------------------------------- withdrawals ---------------------------- */
 
-export function submitWithdrawal(
+export async function submitWithdrawal(
   user: SessionUser,
   input: { methodId: string; amount: number; destination: string; note?: string },
   meta: RequestMeta
-): FundRequest {
-  const platform = settingsRepo.getPlatformSettings();
+): Promise<FundRequest> {
+  const platform = await settingsRepo.getPlatformSettings();
   if (!platform.withdrawalEnabled) {
     throw new ApiError(403, "Withdrawals are temporarily disabled. Please try again later.");
   }
-  const method = methods.getMethod(input.methodId);
+  const method = await methods.getMethod(input.methodId);
   if (!method) throw new ApiError(400, "Unknown payout method.");
 
-  const held = wallet.getAmount(user.id, "USD");
+  const held = await wallet.getAmount(user.id, "USD");
   if (held + 1e-9 < input.amount) {
     throw new ApiError(
       400,
@@ -338,10 +344,10 @@ export function submitWithdrawal(
 
   const { fee } = calculateFee(method, input.amount);
 
-  const request = transaction<FundRequest>(() => {
+  const request = await transaction<FundRequest>(async () => {
     // Escrow: funds leave the wallet immediately so they cannot be double-spent.
-    wallet.debit(user.id, "USD", input.amount);
-    const created = funds.createFundRequest({
+    await wallet.debit(user.id, "USD", input.amount);
+    const created = await funds.createFundRequest({
       userId: user.id,
       kind: "withdrawal",
       methodId: method.id,
@@ -353,7 +359,7 @@ export function submitWithdrawal(
       note: input.note,
       proof: null,
     });
-    db()
+    await db()
       .prepare(
         `INSERT INTO transactions (id, user_id, type, asset, amount, price, fee, status, note, ref_id, created_at)
          VALUES (?, ?, 'withdrawal', 'USD', ?, 1, ?, 'pending', ?, ?, ?)`
@@ -370,7 +376,7 @@ export function submitWithdrawal(
     return created;
   });
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "withdrawalSubmitted",
     userId: user.id,
     summary: `Requested a ${money(request.amount)} withdrawal to ${request.destination}`,
@@ -381,7 +387,7 @@ export function submitWithdrawal(
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId: user.id,
     title: "Withdrawal requested",
     body: `${money(request.amount)} to ${request.destination} is awaiting administrator approval.`,
@@ -389,7 +395,7 @@ export function submitWithdrawal(
     href: "/deposits",
   });
 
-  notifyAdmins({
+  await notifyAdmins({
     title: "Withdrawal awaiting approval",
     body: `${user.name} requested ${money(request.amount)} to ${request.destination}.`,
     href: "/admin/deposits?kind=withdrawal",
@@ -402,17 +408,17 @@ export function submitWithdrawal(
 /* --------------------------------- helpers ------------------------------- */
 
 /** Pushes a notification to every active administrator. */
-export function notifyAdmins(input: {
+export async function notifyAdmins(input: {
   title: string;
   body?: string;
   href?: string;
   kind?: "info" | "success" | "warning" | "error";
-}): number {
-  const admins = db()
+}): Promise<number> {
+  const admins = (await db()
     .prepare("SELECT id FROM users WHERE role = 'admin' AND status = 'active'")
-    .all() as { id: string }[];
+    .all()) as { id: string }[];
   for (const admin of admins) {
-    notifications.pushNotification({
+    await notifications.pushNotification({
       userId: admin.id,
       title: input.title,
       body: input.body,
@@ -423,6 +429,6 @@ export function notifyAdmins(input: {
   return admins.length;
 }
 
-export function pendingReviewCount(): number {
-  return funds.countPending("deposit") + funds.countPending("withdrawal");
+export async function pendingReviewCount(): Promise<number> {
+  return (await funds.countPending("deposit")) + (await funds.countPending("withdrawal"));
 }

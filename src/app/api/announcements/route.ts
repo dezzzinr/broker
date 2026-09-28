@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 /** GET /api/announcements — published announcements for the support page. */
 export async function GET() {
   try {
-    return ok({ announcements: listAnnouncements({ limit: 20 }) });
+    return ok({ announcements: await listAnnouncements({ limit: 20 }) });
   } catch (error) {
     return handleApiError(error);
   }

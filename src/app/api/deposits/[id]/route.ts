@@ -14,7 +14,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   try {
     const user = await requireApiUser();
     const { id } = await ctx.params;
-    const request = getFundRequest(id);
+    const request = await getFundRequest(id);
     if (!request) throw notFound("That request does not exist.");
     if (request.userId !== user.id && user.role !== "admin") throw forbidden();
     return ok({ request });
@@ -30,11 +30,11 @@ export async function DELETE(req: Request, ctx: Ctx) {
     const user = await requireApiUser();
     const meta = await requestMeta();
     const { id } = await ctx.params;
-    const request = getFundRequest(id);
+    const request = await getFundRequest(id);
     if (!request) throw notFound("That request does not exist.");
     if (request.userId !== user.id) throw forbidden();
 
-    cancelDeposit(user, id, meta);
+    await cancelDeposit(user, id, meta);
     return ok({ cancelled: true });
   } catch (error) {
     return handleApiError(error);

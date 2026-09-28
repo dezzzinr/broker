@@ -2,32 +2,202 @@ import "server-only";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type BetterSqlite3 from "better-sqlite3";
 import { seedIfEmpty } from "./seed";
 
 /**
  * Quantix persistence layer.
  *
- * A single SQLite database (better-sqlite3) holds every platform entity:
- * accounts, sessions, wallets, deposit methods, fund requests with proof-of-
- * payment blobs, the ledger, activity logs and notifications.
+ * Two interchangeable backends behind one async facade:
  *
- * The connection is a module-level singleton so hot reloads in `next dev`
- * don't leak file handles. Set `QUANTIX_DB_PATH` to relocate the database.
+ * - **SQLite** (default) — a single `better-sqlite3` file at `data/quantix.db`
+ *   (`QUANTIX_DB_PATH` overrides). Perfect for local development and any host
+ *   with a real filesystem.
+ * - **Postgres** — used automatically when `POSTGRES_URL` (or `DATABASE_URL`)
+ *   is set. This is what Vercel deployments must use: serverless functions
+ *   each get a private, ephemeral filesystem, so a local SQLite file can never
+ *   be shared between them (signups would vanish between requests).
  *
- * Without `QUANTIX_DB_PATH` the database lives at `data/quantix.db` — but
- * serverless filesystems (Vercel functions) are read-only outside `/tmp`, so
- * the resolver below falls back to the OS temp directory there. That fallback
- * keeps the app running but is **ephemeral** (per instance, gone on cold
- * start); see README → "Deploying to Vercel".
+ * Call sites keep the familiar better-sqlite3 shape, now awaited:
+ *
+ * ```ts
+ * const row = await db().prepare("SELECT * FROM users WHERE id = ?").get(id);
+ * await db().prepare("UPDATE … SET … WHERE id = ?").run(value, id);
+ * await transaction(async () => { … }); // one atomic unit of work
+ * ```
+ *
+ * `?` placeholders are used everywhere and rewritten to `$1…$n` for Postgres.
+ * Statements should stick to the shared SQL subset (the repos already do):
+ * no `julianday`/`datetime`, use `LOWER(a) LIKE LOWER(?)` for searching, and
+ * prefer `INSERT … ON CONFLICT … DO UPDATE` over `INSERT OR REPLACE`.
  */
 
+/* ------------------------------- types -------------------------------- */
+
+export type Row = Record<string, unknown>;
+
+export interface RunResult {
+  /** Rows inserted/updated/deleted (better-sqlite3 parity). */
+  changes: number;
+}
+
+export interface Stmt {
+  get<T = Row>(...args: unknown[]): Promise<T | undefined>;
+  all<T = Row>(...args: unknown[]): Promise<T[]>;
+  run(...args: unknown[]): Promise<RunResult>;
+}
+
+export interface Handle {
+  readonly dialect: Dialect;
+  prepare(sql: string): Stmt;
+  /**
+   * Cross-instance write lock to be called inside `transaction()` — a no-op
+   * on SQLite (BEGIN IMMEDIATE already serialises writers) and a Postgres
+   * advisory xact lock elsewhere. Used to serialise first-run seeding.
+   */
+  lock(name: string): Promise<void>;
+}
+
+export type Dialect = "sqlite" | "postgres";
+
+/* ------------------------------ driver -------------------------------- */
+
+interface Queryable {
+  query<T = Row>(sql: string, args: unknown[]): Promise<T[]>;
+  run(sql: string, args: unknown[]): Promise<number>;
+  lock(name: string): Promise<void>;
+}
+
+interface Tx extends Queryable {
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+  release(): void;
+}
+
+interface Driver {
+  dialect: Dialect;
+  query<T = Row>(sql: string, args: unknown[]): Promise<T[]>;
+  run(sql: string, args: unknown[]): Promise<number>;
+  exec(sql: string): Promise<void>;
+  begin(): Promise<Tx>;
+  describe(): string;
+}
+
+/** `?` → `$1…$n` for Postgres, skipping `?` inside single-quoted literals. */
+function rebind(sql: string): string {
+  let out = "";
+  let n = 0;
+  let inLiteral = false;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'") {
+      // '' escapes a literal quote in SQL; stay inside the literal.
+      if (inLiteral && sql[i + 1] === "'") {
+        out += "''";
+        i++;
+        continue;
+      }
+      inLiteral = !inLiteral;
+      out += ch;
+    } else if (ch === "?" && !inLiteral) {
+      out += `$${++n}`;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Which backend serves this process — decided by env, stable before init. */
+function activeDialect(): Dialect {
+  return process.env.POSTGRES_URL ?? process.env.DATABASE_URL ? "postgres" : "sqlite";
+}
+
+/* --------------------------- sqlite driver ----------------------------- */
+
+type SqliteStmtCache = Map<string, BetterSqlite3.Statement>;
+
+function sqliteTx(conn: BetterSqlite3.Database): Tx {
+  const cache: SqliteStmtCache = new Map();
+  const prep = (sql: string) => {
+    let stmt = cache.get(sql);
+    if (!stmt) {
+      stmt = conn.prepare(sql);
+      cache.set(sql, stmt);
+    }
+    return stmt;
+  };
+  return {
+    async query<T>(sql: string, args: unknown[]): Promise<T[]> {
+      return prep(sql).all(...(args as never[])) as T[];
+    },
+    async run(sql: string, args: unknown[]): Promise<number> {
+      return prep(sql).run(...(args as never[])).changes;
+    },
+    async lock() {
+      /* BEGIN IMMEDIATE already holds the write lock. */
+    },
+    async commit() {
+      conn.exec("COMMIT");
+    },
+    async rollback() {
+      conn.exec("ROLLBACK");
+    },
+    release() {
+      conn.close();
+    },
+  };
+}
+
+async function createSqliteDriver(resolvePath: () => string): Promise<Driver> {
+  const { default: Database } = await import("better-sqlite3");
+  const DB_PATH = resolvePath();
+  const open = () => {
+    const conn = new Database(DB_PATH);
+    conn.pragma("journal_mode = WAL");
+    conn.pragma("foreign_keys = ON");
+    conn.pragma("busy_timeout = 5000");
+    return conn;
+  };
+  const singleton = open();
+  const cache: SqliteStmtCache = new Map();
+  const prep = (sql: string) => {
+    let stmt = cache.get(sql);
+    if (!stmt) {
+      stmt = singleton.prepare(sql);
+      cache.set(sql, stmt);
+    }
+    return stmt;
+  };
+  return {
+    dialect: "sqlite",
+    async query<T>(sql: string, args: unknown[]): Promise<T[]> {
+      return prep(sql).all(...(args as never[])) as T[];
+    },
+    async run(sql: string, args: unknown[]): Promise<number> {
+      return prep(sql).run(...(args as never[])).changes;
+    },
+    async exec(sql: string): Promise<void> {
+      singleton.exec(sql);
+    },
+    async begin(): Promise<Tx> {
+      const conn = open();
+      conn.exec("BEGIN IMMEDIATE");
+      return sqliteTx(conn);
+    },
+    describe() {
+      return DB_PATH;
+    },
+  };
+}
+
 /**
- * Picks the SQLite file location. `QUANTIX_DB_PATH` always wins; otherwise try
- * `data/quantix.db` and fall back to a writable temp file when the working
- * directory is read-only (the Vercel/`/var/task` case).
+ * Where the SQLite file lives. `QUANTIX_DB_PATH` always wins; otherwise try
+ * `data/quantix.db` and fall back to the OS temp directory when the working
+ * directory is read-only (bare serverless without a Postgres URL — demo only).
  */
-function resolveDbPath(): string {
+function resolveSqlitePath(): string {
   const explicit = process.env.QUANTIX_DB_PATH;
   if (explicit) return explicit;
 
@@ -37,26 +207,100 @@ function resolveDbPath(): string {
     fs.accessSync(path.dirname(local), fs.constants.W_OK);
     return local;
   } catch {
-    // EROFS (or similar): e.g. Vercel lambdas, where only /tmp is writable.
     const fallback = path.join(os.tmpdir(), "quantix.db");
     console.warn(
       `[quantix:db] cannot write to "${path.dirname(local)}" (read-only serverless fs?); ` +
-        `falling back to ephemeral "${fallback}". Set QUANTIX_DB_PATH for persistent storage.`,
+        `falling back to EPHEMERAL "${fallback}". Set POSTGRES_URL (Vercel Postgres/Neon) ` +
+        `for shared persistent storage.`,
     );
     return fallback;
   }
 }
 
-const DB_PATH = resolveDbPath();
+/* --------------------------- postgres driver --------------------------- */
 
-declare global {
-  var __quantixDb: Database.Database | undefined;
+async function createPostgresDriver(connectionString: string): Promise<Driver> {
+  const { Pool, types } = await import("pg");
+  // COUNT(*) & friends come back as int8 strings — expose plain numbers so
+  // the `as { c: number }` casts at call sites keep working.
+  types.setTypeParser(20, (v: string) => Number(v));
+
+  const pool = new Pool({
+    connectionString,
+    max: 5,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+  });
+
+  const make = (q: { query: (sql: string, args?: unknown[]) => Promise<{ rows: unknown[]; rowCount: number | null }> }): Queryable => ({
+    async query<T>(sql: string, args: unknown[]): Promise<T[]> {
+      const res = await q.query(rebind(sql), args);
+      return res.rows as T[];
+    },
+    async run(sql: string, args: unknown[]): Promise<number> {
+      const res = await q.query(rebind(sql), args);
+      return res.rowCount ?? 0;
+    },
+    async lock(name: string): Promise<void> {
+      await q.query("SELECT pg_advisory_xact_lock($1)", [hashName(name)]);
+    },
+  });
+
+  return {
+    dialect: "postgres",
+    query: (sql, args) => make(pool).query(sql, args),
+    run: (sql, args) => make(pool).run(sql, args),
+    async exec(sql: string): Promise<void> {
+      await pool.query(sql);
+    },
+    async begin(): Promise<Tx> {
+      const client = await pool.connect();
+      await client.query("BEGIN");
+      const base = make(client);
+      return {
+        ...base,
+        async commit() {
+          await client.query("COMMIT");
+        },
+        async rollback() {
+          await client.query("ROLLBACK");
+        },
+        release() {
+          client.release();
+        },
+      };
+    },
+    describe() {
+      try {
+        const u = new URL(connectionString);
+        return `postgres://${u.hostname}${u.pathname}`;
+      } catch {
+        return "postgres://(unparseable url)";
+      }
+    },
+  };
 }
 
-export const SCHEMA = `
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+function hashName(name: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // Signed 32-bit so it fits a Postgres bigint advisory lock.
+  return h | 0;
+}
 
+/* ------------------------------- schema -------------------------------- */
+
+/**
+ * Shared-subset DDL. The only dialect difference is the proof-of-payment
+ * column: BLOB locally, BYTEA on Postgres. `DOUBLE PRECISION` maps to
+ * SQLite's 8-byte REAL and Postgres' 8-byte float alike.
+ */
+function schemaSql(dialect: Dialect): string {
+  const BLOB = dialect === "postgres" ? "BYTEA" : "BLOB";
+  return `
 CREATE TABLE IF NOT EXISTS users (
   id             TEXT PRIMARY KEY,
   email          TEXT NOT NULL UNIQUE,
@@ -89,8 +333,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS balances (
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   asset      TEXT NOT NULL,
-  amount     REAL NOT NULL DEFAULT 0,
-  avg_cost   REAL NOT NULL DEFAULT 0,
+  amount     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  avg_cost   DOUBLE PRECISION NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, asset)
 );
@@ -105,9 +349,9 @@ CREATE TABLE IF NOT EXISTS deposit_methods (
   account_number   TEXT NOT NULL DEFAULT '',
   bank_name        TEXT NOT NULL DEFAULT '',
   reference_prefix TEXT NOT NULL DEFAULT '',
-  min_amount       REAL NOT NULL DEFAULT 10,
-  max_amount       REAL NOT NULL DEFAULT 100000,
-  fee_percent      REAL NOT NULL DEFAULT 0,
+  min_amount       DOUBLE PRECISION NOT NULL DEFAULT 10,
+  max_amount       DOUBLE PRECISION NOT NULL DEFAULT 100000,
+  fee_percent      DOUBLE PRECISION NOT NULL DEFAULT 0,
   processing_time  TEXT NOT NULL DEFAULT 'Within 1 hour',
   enabled          INTEGER NOT NULL DEFAULT 1,
   sort_order       INTEGER NOT NULL DEFAULT 0,
@@ -122,9 +366,9 @@ CREATE TABLE IF NOT EXISTS fund_requests (
   method_id     TEXT REFERENCES deposit_methods(id) ON DELETE SET NULL,
   method_name   TEXT NOT NULL,
   asset         TEXT NOT NULL DEFAULT 'USD',
-  amount        REAL NOT NULL,
-  fee           REAL NOT NULL DEFAULT 0,
-  credit        REAL NOT NULL DEFAULT 0,
+  amount        DOUBLE PRECISION NOT NULL,
+  fee           DOUBLE PRECISION NOT NULL DEFAULT 0,
+  credit        DOUBLE PRECISION NOT NULL DEFAULT 0,
   status        TEXT NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending','approved','rejected','cancelled')),
   reference     TEXT NOT NULL DEFAULT '',
@@ -134,7 +378,7 @@ CREATE TABLE IF NOT EXISTS fund_requests (
   proof_mime    TEXT,
   proof_name    TEXT,
   proof_size    INTEGER,
-  proof         BLOB,
+  proof         ${BLOB},
   submitted_at  TEXT NOT NULL,
   reviewed_at   TEXT,
   reviewed_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -146,9 +390,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type       TEXT NOT NULL,
   asset      TEXT NOT NULL,
-  amount     REAL NOT NULL,
-  price      REAL NOT NULL DEFAULT 0,
-  fee        REAL NOT NULL DEFAULT 0,
+  amount     DOUBLE PRECISION NOT NULL,
+  price      DOUBLE PRECISION NOT NULL DEFAULT 0,
+  fee        DOUBLE PRECISION NOT NULL DEFAULT 0,
   status     TEXT NOT NULL DEFAULT 'completed',
   note       TEXT NOT NULL DEFAULT '',
   ref_id     TEXT,
@@ -219,33 +463,143 @@ CREATE INDEX IF NOT EXISTS idx_notifications    ON notifications(user_id, read, 
 CREATE INDEX IF NOT EXISTS idx_attempts         ON login_attempts(identifier, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_created    ON users(created_at DESC);
 `;
-
-function open(): Database.Database {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  const db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000");
-  db.exec(SCHEMA);
-  return db;
 }
 
-export function db(): Database.Database {
-  if (!globalThis.__quantixDb) {
-    // Assign before seeding so the seeder resolves the same connection.
-    globalThis.__quantixDb = open();
+/* ---------------------------- init / facade ---------------------------- */
+
+let driver: Driver | null = null;
+let init: Promise<void> | null = null;
+let seeding: Promise<void> | null = null;
+
+/** Marks the async context of the seeder so its own queries never await it. */
+const seedScope = new AsyncLocalStorage<true>();
+
+function ensureReady(): Promise<void> {
+  if (!init) {
+    init = (async () => {
+      const pgUrl = process.env.POSTGRES_URL ?? process.env.DATABASE_URL;
+      driver = pgUrl
+        ? await createPostgresDriver(pgUrl)
+        : await createSqliteDriver(resolveSqlitePath);
+      await driver.exec(schemaSql(driver.dialect));
+    })();
+  }
+  return init;
+}
+
+/**
+ * First-run seed, memoised so concurrent cold starts share one run while the
+ * seeder's own queries (which re-enter through `transaction`) proceed without
+ * waiting on themselves. Inside, `seedIfEmpty` takes a `quantix:seed` lock —
+ * a Postgres advisory xact lock, BEGIN IMMEDIATE on SQLite — so parallel
+ * instances can't double-seed.
+ */
+function seedOnce(): Promise<void> {
+  if (seedScope.getStore()) return Promise.resolve(); // inside the seeder itself
+  seeding ??= seedScope.run(true, async () => {
     try {
-      seedIfEmpty();
+      await seedIfEmpty();
     } catch (error) {
       console.error("[quantix:db] seed failed", error);
     }
+  });
+  return seeding;
+}
+
+function handle(q: Queryable): Handle {
+  return {
+    dialect: activeDialect(),
+    prepare(sql: string): Stmt {
+      return {
+        async get<T = Row>(...args: unknown[]): Promise<T | undefined> {
+          await ensureReady();
+          const rows = await q.query<T>(sql, args);
+          return rows[0];
+        },
+        async all<T = Row>(...args: unknown[]): Promise<T[]> {
+          await ensureReady();
+          return q.query<T>(sql, args);
+        },
+        async run(...args: unknown[]): Promise<RunResult> {
+          await ensureReady();
+          return { changes: await q.run(sql, args) };
+        },
+      };
+    },
+    lock(name: string) {
+      return q.lock(name);
+    },
+  };
+}
+
+const txStorage = new AsyncLocalStorage<Queryable>();
+
+/**
+ * The database handle for the current async context: a transaction-bound
+ * connection inside `transaction()`, the shared pool otherwise.
+ */
+export function db(): Handle {
+  const tx = txStorage.getStore();
+  return handle(
+    tx ?? {
+      async query<T>(sql: string, args: unknown[]): Promise<T[]> {
+        await ensureReady();
+        await seedOnce();
+        return driver!.query<T>(sql, args);
+      },
+      async run(sql: string, args: unknown[]): Promise<number> {
+        await ensureReady();
+        await seedOnce();
+        return driver!.run(sql, args);
+      },
+      async lock(name: string): Promise<void> {
+        await ensureReady();
+        if (!txStorage.getStore()) {
+          throw new Error("[quantix:db] lock() must run inside transaction()");
+        }
+        await txStorage.getStore()!.lock(name);
+      },
+    },
+  );
+}
+
+/**
+ * Runs `fn` atomically on a dedicated connection (BEGIN IMMEDIATE on SQLite,
+ * BEGIN on Postgres). Nested calls join the outer transaction.
+ */
+export async function transaction<T>(fn: () => T | Promise<T>): Promise<T> {
+  if (txStorage.getStore()) return fn();
+  await ensureReady();
+  await seedOnce();
+  const tx = await driver!.begin();
+  try {
+    const result = await txStorage.run(tx, () => fn());
+    await tx.commit();
+    return result;
+  } catch (error) {
+    try {
+      await tx.rollback();
+    } catch {
+      /* connection already broken */
+    }
+    throw error;
+  } finally {
+    tx.release();
   }
-  return globalThis.__quantixDb;
 }
 
-export const DB_FILE = DB_PATH;
-
-/** Runs `fn` inside an immediate transaction (better-sqlite3 style). */
-export function transaction<T>(fn: () => T): T {
-  return db().transaction(fn)();
+/** Human-readable location of the active store (for logs and scripts). */
+export function dbDescribe(): string {
+  return driver ? `${driver.dialect} @ ${driver.describe()}` : "uninitialised";
 }
+
+export const DB_FILE = process.env.POSTGRES_URL ?? process.env.DATABASE_URL
+  ? `postgres @ ${(() => {
+      try {
+        const u = new URL(process.env.POSTGRES_URL ?? process.env.DATABASE_URL!);
+        return u.hostname + u.pathname;
+      } catch {
+        return "(url)";
+      }
+    })()}`
+  : process.env.QUANTIX_DB_PATH ?? path.join(process.cwd(), "data", "quantix.db");

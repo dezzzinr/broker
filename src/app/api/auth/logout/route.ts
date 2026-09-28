@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     assertSameOrigin(req);
     const meta = await requestMeta();
     const { user, token } = await getSessionUserWithToken();
-    signOut(token, user, meta);
+    await signOut(token, user, meta);
 
     const res = NextResponse.json({ ok: true, data: { signedOut: true } });
     res.cookies.set(SESSION_COOKIE, "", { path: "/", maxAge: 0 });

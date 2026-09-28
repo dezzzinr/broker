@@ -65,11 +65,11 @@ export interface LogActivityInput {
   userAgent?: string;
 }
 
-export function logActivity(input: LogActivityInput): ActivityLog {
+export async function logActivity(input: LogActivityInput): Promise<ActivityLog> {
   const def = ACTIVITY_ACTIONS[input.actionKey];
   const now = new Date().toISOString();
   const id = newId("act");
-  db()
+  await db()
     .prepare(
       `INSERT INTO activity_logs
         (id, user_id, actor_id, action, category, summary, entity_type, entity_id, meta,
@@ -92,7 +92,7 @@ export function logActivity(input: LogActivityInput): ActivityLog {
       now
     );
 
-  return getActivity(id)!;
+  return (await getActivity(id))!;
 }
 
 function defaultSeverity(key: ActivityActionKey): ActivitySeverity {
@@ -110,8 +110,8 @@ function defaultSeverity(key: ActivityActionKey): ActivitySeverity {
   return "info";
 }
 
-export function getActivity(id: string): ActivityLog | null {
-  const row = db()
+export async function getActivity(id: string): Promise<ActivityLog | null> {
+  const row = (await db()
     .prepare(
       `SELECT a.*, u.name AS user_name, u.email AS user_email,
               r.name AS actor_name, r.email AS actor_email
@@ -120,7 +120,7 @@ export function getActivity(id: string): ActivityLog | null {
          LEFT JOIN users r ON r.id = a.actor_id
         WHERE a.id = ?`
     )
-    .get(id) as Record<string, unknown> | undefined;
+    .get(id)) as Record<string, unknown> | undefined;
   return row ? mapActivity(row) : null;
 }
 
@@ -137,9 +137,9 @@ export interface ListActivityParams {
   pageSize?: number;
 }
 
-export function listActivity(
+export async function listActivity(
   params: ListActivityParams = {}
-): { rows: ActivityLog[]; total: number } {
+): Promise<{ rows: ActivityLog[]; total: number }> {
   const {
     userId,
     actorId,
@@ -185,7 +185,9 @@ export function listActivity(
     args.push(until);
   }
   if (query.trim()) {
-    where.push("(a.summary LIKE ? OR u.name LIKE ? OR u.email LIKE ? OR a.action LIKE ?)");
+    where.push(
+      "(LOWER(a.summary) LIKE LOWER(?) OR LOWER(u.name) LIKE LOWER(?) OR LOWER(u.email) LIKE LOWER(?) OR LOWER(a.action) LIKE LOWER(?))"
+    );
     const like = `%${query.trim()}%`;
     args.push(like, like, like, like);
   }
@@ -196,14 +198,12 @@ export function listActivity(
                 LEFT JOIN users r ON r.id = a.actor_id`;
 
   const total = (
-    db()
-      .prepare(
-        `SELECT COUNT(*) AS c ${from} ${whereSql.replace(/\bu\./g, "u.").replace(/\ba\./g, "a.")}`
-      )
-      .get(...args) as { c: number }
+    (await db()
+      .prepare(`SELECT COUNT(*) AS c ${from} ${whereSql}`)
+      .get(...args)) as { c: number }
   ).c;
 
-  const rows = db()
+  const rows = (await db()
     .prepare(
       `SELECT a.*, u.name AS user_name, u.email AS user_email,
               r.name AS actor_name, r.email AS actor_email
@@ -211,7 +211,7 @@ export function listActivity(
         ORDER BY a.created_at DESC
         LIMIT ? OFFSET ?`
     )
-    .all(...args, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
+    .all(...args, pageSize, (page - 1) * pageSize)) as Record<string, unknown>[];
 
   return { rows: rows.map(mapActivity), total };
 }
@@ -247,29 +247,29 @@ function mapActivity(row: Record<string, unknown>): ActivityLog {
 }
 
 /** Distinct actions seen so far — powers the admin filter dropdown. */
-export function listActivityActions(): { action: string; count: number }[] {
-  return db()
+export async function listActivityActions(): Promise<{ action: string; count: number }[]> {
+  return (await db()
     .prepare(
       "SELECT action, COUNT(*) AS count FROM activity_logs GROUP BY action ORDER BY count DESC"
     )
-    .all() as { action: string; count: number }[];
+    .all()) as { action: string; count: number }[];
 }
 
-export function countActivitySince(iso: string, userId?: string): number {
+export async function countActivitySince(iso: string, userId?: string): Promise<number> {
   const row = userId
-    ? (db()
+    ? ((await db()
         .prepare(
           "SELECT COUNT(*) AS c FROM activity_logs WHERE created_at >= ? AND user_id = ?"
         )
-        .get(iso, userId) as { c: number })
-    : (db()
+        .get(iso, userId)) as { c: number })
+    : ((await db()
         .prepare("SELECT COUNT(*) AS c FROM activity_logs WHERE created_at >= ?")
-        .get(iso) as { c: number });
+        .get(iso)) as { c: number });
   return row.c;
 }
 
-export function deleteActivityForUser(userId: string): void {
-  db().prepare("UPDATE activity_logs SET user_id = NULL, actor_id = NULL WHERE user_id = ?").run(
-    userId
-  );
+export async function deleteActivityForUser(userId: string): Promise<void> {
+  await db()
+    .prepare("UPDATE activity_logs SET user_id = NULL, actor_id = NULL WHERE user_id = ?")
+    .run(userId);
 }

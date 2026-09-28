@@ -24,7 +24,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   try {
     await requireApiAdmin();
     const { id } = await ctx.params;
-    const request = getFundRequest(id);
+    const request = await getFundRequest(id);
     if (!request) throw notFound("That request no longer exists.");
     return ok({ request });
   } catch (error) {
@@ -50,8 +50,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const input = await readJson(req, reviewSchema);
     const request =
       input.decision === "approved"
-        ? approveDeposit(admin, id, meta, input.note)
-        : rejectDeposit(admin, id, meta, input.note);
+        ? await approveDeposit(admin, id, meta, input.note)
+        : await rejectDeposit(admin, id, meta, input.note);
 
     return ok({ request });
   } catch (error) {

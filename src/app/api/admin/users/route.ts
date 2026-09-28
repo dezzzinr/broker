@@ -15,7 +15,7 @@ export async function GET(req: Request) {
     const sort = url.searchParams.get("sort") as ListUsersParams["sort"] | null;
     const dir = url.searchParams.get("dir") as "asc" | "desc" | null;
 
-    const result = listUsers({
+    const result = await listUsers({
       query: url.searchParams.get("q") ?? "",
       status: (url.searchParams.get("status") ?? "all") as ListUsersParams["status"],
       role: (url.searchParams.get("role") ?? "all") as ListUsersParams["role"],

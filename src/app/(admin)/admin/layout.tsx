@@ -18,11 +18,11 @@ export const dynamic = "force-dynamic";
  */
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const admin = await requireAdmin();
-  const platform = getPlatformSettings();
-  const pending = countPending("deposit") + countPending("withdrawal");
+  const platform = await getPlatformSettings();
+  const pending = await countPending("deposit") + await countPending("withdrawal");
 
   return (
-    <SessionProvider user={admin} unread={unreadCount(admin.id)} pendingReviews={pending}>
+    <SessionProvider user={admin} unread={await unreadCount(admin.id)} pendingReviews={pending}>
       {platform.maintenanceMode && (
         <div className="flex items-center gap-2.5 border-b border-warning/25 bg-warning/10 px-4 py-2 text-[12px] text-warning lg:pl-[274px]">
           <Construction className="size-4 shrink-0" aria-hidden />

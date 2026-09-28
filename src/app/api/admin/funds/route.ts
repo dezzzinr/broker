@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     await requireApiAdmin();
     const url = new URL(req.url);
 
-    const result = listFundRequests({
+    const result = await listFundRequests({
       kind: (url.searchParams.get("kind") ?? "all") as FundKind | "all",
       status: (url.searchParams.get("status") ?? "pending") as FundStatus | "all",
       query: url.searchParams.get("q") ?? "",

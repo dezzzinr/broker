@@ -13,7 +13,7 @@ export default async function SignupPage() {
   const user = await getSessionUser();
   if (user) redirect("/dashboard");
 
-  const platform = getPlatformSettings();
+  const platform = await getPlatformSettings();
   if (!platform.registrationsOpen) redirect("/login?reason=closed");
 
   return <SignupForm />;

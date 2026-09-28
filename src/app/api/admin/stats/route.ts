@@ -9,17 +9,17 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     await requireApiAdmin();
-    const stats = getPlatformStats();
-    const { rows: activityRows } = listActivity({ pageSize: 12 });
-    const { rows: pending, total: pendingTotal, pendingValue } = listFundRequests({
+    const stats = await getPlatformStats();
+    const { rows: activityRows } = await listActivity({ pageSize: 12 });
+    const { rows: pending, total: pendingTotal, pendingValue } = await listFundRequests({
       status: "pending",
       pageSize: 6,
     });
 
     return ok({
       stats,
-      wallets: walletTotals(),
-      recentUsers: recentUsers(6),
+      wallets: await walletTotals(),
+      recentUsers: await recentUsers(6),
       recentActivity: activityRows,
       pendingRequests: pending,
       pendingTotal,

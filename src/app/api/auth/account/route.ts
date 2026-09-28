@@ -33,11 +33,11 @@ export async function POST(req: Request) {
     if (input.intent === "password") {
       const limit = rateLimit(`password:${user.id}`, 5, 10 * 60_000);
       if (!limit.allowed) throw tooMany("Too many password changes. Try again later.");
-      changePassword(user, input.currentPassword, input.newPassword, meta);
+      await changePassword(user, input.currentPassword, input.newPassword, meta);
       return ok({ updated: "password" });
     }
 
-    const updated = updateProfile(user, input, meta);
+    const updated = await updateProfile(user, input, meta);
     return ok({ updated: "profile", user: updated });
   } catch (error) {
     return handleApiError(error);

@@ -8,7 +8,7 @@ import type { LedgerEntry, LedgerType } from "@/lib/types/platform";
  * Transactions page and in the admin console.
  */
 
-export function addLedgerEntry(input: {
+export async function addLedgerEntry(input: {
   userId: string;
   type: LedgerType;
   asset: string;
@@ -18,10 +18,10 @@ export function addLedgerEntry(input: {
   status?: LedgerEntry["status"];
   note?: string;
   refId?: string | null;
-}): LedgerEntry {
+}): Promise<LedgerEntry> {
   const now = new Date().toISOString();
   const id = `tx_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-  db()
+  await db()
     .prepare(
       `INSERT INTO transactions (id, user_id, type, asset, amount, price, fee, status, note, ref_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -39,16 +39,16 @@ export function addLedgerEntry(input: {
       input.refId ?? null,
       now
     );
-  return getLedgerEntry(id)!;
+  return (await getLedgerEntry(id))!;
 }
 
-export function getLedgerEntry(id: string): LedgerEntry | null {
-  const row = db()
+export async function getLedgerEntry(id: string): Promise<LedgerEntry | null> {
+  const row = (await db()
     .prepare(
       `SELECT t.*, u.name AS user_name, u.email AS user_email
          FROM transactions t JOIN users u ON u.id = t.user_id WHERE t.id = ?`
     )
-    .get(id) as Record<string, unknown> | undefined;
+    .get(id)) as Record<string, unknown> | undefined;
   return row ? mapLedger(row) : null;
 }
 
@@ -60,9 +60,9 @@ export interface ListLedgerParams {
   pageSize?: number;
 }
 
-export function listLedger(
+export async function listLedger(
   params: ListLedgerParams = {}
-): { rows: LedgerEntry[]; total: number } {
+): Promise<{ rows: LedgerEntry[]; total: number }> {
   const { userId, type = "all", query = "", page = 1, pageSize = 25 } = params;
   const where: string[] = [];
   const args: (string | number)[] = [];
@@ -75,7 +75,9 @@ export function listLedger(
     args.push(type);
   }
   if (query.trim()) {
-    where.push("(t.note LIKE ? OR t.asset LIKE ? OR u.name LIKE ? OR u.email LIKE ?)");
+    where.push(
+      "(LOWER(t.note) LIKE LOWER(?) OR LOWER(t.asset) LIKE LOWER(?) OR LOWER(u.name) LIKE LOWER(?) OR LOWER(u.email) LIKE LOWER(?))"
+    );
     const like = `%${query.trim()}%`;
     args.push(like, like, like, like);
   }
@@ -83,16 +85,16 @@ export function listLedger(
   const from = `FROM transactions t JOIN users u ON u.id = t.user_id`;
 
   const total = (
-    db().prepare(`SELECT COUNT(*) AS c ${from} ${whereSql}`).get(...args) as { c: number }
+    (await db().prepare(`SELECT COUNT(*) AS c ${from} ${whereSql}`).get(...args)) as { c: number }
   ).c;
 
-  const rows = db()
+  const rows = (await db()
     .prepare(
       `SELECT t.*, u.name AS user_name, u.email AS user_email
          ${from} ${whereSql}
         ORDER BY t.created_at DESC LIMIT ? OFFSET ?`
     )
-    .all(...args, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
+    .all(...args, pageSize, (page - 1) * pageSize)) as Record<string, unknown>[];
 
   return { rows: rows.map(mapLedger), total };
 }

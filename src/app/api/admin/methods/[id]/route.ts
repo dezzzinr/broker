@@ -24,10 +24,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const admin = await requireApiAdmin();
     const meta = await requestMeta();
     const { id } = await ctx.params;
-    if (!getMethod(id)) throw notFound("Deposit method not found.");
+    if (!await getMethod(id)) throw notFound("Deposit method not found.");
 
     const input = await readJson(req, methodPatchSchema);
-    const method = saveMethod(admin, { ...input, id }, meta);
+    const method = await saveMethod(admin, { ...input, id }, meta);
     return ok({ method });
   } catch (error) {
     return handleApiError(error);
@@ -41,7 +41,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     const admin = await requireApiAdmin();
     const meta = await requestMeta();
     const { id } = await ctx.params;
-    removeMethod(admin, id, meta);
+    await removeMethod(admin, id, meta);
     return ok({ deleted: true });
   } catch (error) {
     return handleApiError(error);

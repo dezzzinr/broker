@@ -16,16 +16,16 @@ export const dynamic = "force-dynamic";
 
 export default async function DepositsPage() {
   const user = await requireUser("/deposits");
-  const platform = getPlatformSettings();
-  const methods = listMethods(false);
-  const history = listFundRequests({ userId: user.id, pageSize: 8 });
+  const platform = await getPlatformSettings();
+  const methods = await listMethods(false);
+  const history = await listFundRequests({ userId: user.id, pageSize: 8 });
 
-  const balances = getBalances(user.id);
+  const balances = await getBalances(user.id);
   const cash =
     (balances.find((b) => b.asset === "USD")?.amount ?? 0) +
     (balances.find((b) => b.asset === "USDT")?.amount ?? 0);
 
-  const all = listFundRequests({ userId: user.id, pageSize: 200 });
+  const all = await listFundRequests({ userId: user.id, pageSize: 200 });
   const deposits = all.rows.filter((r) => r.kind === "deposit");
   const pending = deposits.filter((r) => r.status === "pending");
   const approved = deposits.filter((r) => r.status === "approved");

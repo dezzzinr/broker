@@ -35,7 +35,7 @@ export async function POST(req: Request) {
       ...meta,
     });
 
-    notifyAdmins({
+    await notifyAdmins({
       title: `Support request from ${user.name}`,
       body: `${input.topic} — ${input.message.slice(0, 140)}`,
       href: `/admin/activity?userId=${user.id}`,

@@ -28,22 +28,25 @@ export interface SignUpInput {
   phone?: string;
 }
 
-export function signUp(input: SignUpInput, meta: RequestMeta): {
+export async function signUp(
+  input: SignUpInput,
+  meta: RequestMeta
+): Promise<{
   user: PublicUser;
   token: string;
   expiresAt: Date;
-} {
-  const platform = settingsRepo.getPlatformSettings();
+}> {
+  const platform = await settingsRepo.getPlatformSettings();
   if (!platform.registrationsOpen) {
     throw new ApiError(403, "Registrations are currently closed. Please contact support.");
   }
-  if (users.emailExists(input.email)) {
+  if (await users.emailExists(input.email)) {
     throw new ApiError(409, "An account with that email already exists.", {
       email: "That email is already registered.",
     });
   }
 
-  const user = users.createUser({
+  const user = await users.createUser({
     email: input.email,
     name: input.name,
     password: input.password,
@@ -51,10 +54,10 @@ export function signUp(input: SignUpInput, meta: RequestMeta): {
     country: input.country,
   });
 
-  const { token, expiresAt } = createSession(user.id, meta.ip, meta.userAgent);
-  users.recordLogin(user.id, meta.ip);
+  const { token, expiresAt } = await createSession(user.id, meta.ip, meta.userAgent);
+  await users.recordLogin(user.id, meta.ip);
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "signup",
     userId: user.id,
     summary: `Account created for ${user.email}`,
@@ -64,14 +67,14 @@ export function signUp(input: SignUpInput, meta: RequestMeta): {
     meta: { country: user.country, phone: user.phone },
     ...meta,
   });
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "login",
     userId: user.id,
     summary: "Signed in after registration",
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId: user.id,
     title: `Welcome to ${platform.platformName}, ${user.name.split(" ")[0]}`,
     body: "Your account is ready. Make your first deposit to start trading.",
@@ -88,12 +91,12 @@ export interface SignInResult {
   expiresAt: Date;
 }
 
-export function signIn(
+export async function signIn(
   email: string,
   password: string,
   meta: RequestMeta
-): SignInResult {
-  const lockout = loginLockout(email, meta.ip);
+): Promise<SignInResult> {
+  const lockout = await loginLockout(email, meta.ip);
   if (lockout.locked) {
     throw new ApiError(
       429,
@@ -101,12 +104,12 @@ export function signIn(
     );
   }
 
-  const account = users.findByEmail(email);
+  const account = await users.findByEmail(email);
   const valid = account ? verifyPassword(password, account.passwordHash) : false;
 
   if (!account || !valid) {
-    registerLoginAttempt(email, meta.ip, false);
-    activity.logActivity({
+    await registerLoginAttempt(email, meta.ip, false);
+    await activity.logActivity({
       actionKey: "loginFailed",
       userId: account?.id ?? null,
       actorId: account?.id ?? null,
@@ -124,8 +127,8 @@ export function signIn(
   }
 
   if (account.status !== "active") {
-    registerLoginAttempt(email, meta.ip, false);
-    activity.logActivity({
+    await registerLoginAttempt(email, meta.ip, false);
+    await activity.logActivity({
       actionKey: "loginFailed",
       userId: account.id,
       summary: `Sign-in blocked — account is ${account.status}`,
@@ -138,16 +141,16 @@ export function signIn(
     );
   }
 
-  clearLoginAttempts(email);
-  registerLoginAttempt(email, meta.ip, true);
-  const { token, expiresAt } = createSession(account.id, meta.ip, meta.userAgent);
-  users.recordLogin(account.id, meta.ip);
+  await clearLoginAttempts(email);
+  await registerLoginAttempt(email, meta.ip, true);
+  const { token, expiresAt } = await createSession(account.id, meta.ip, meta.userAgent);
+  await users.recordLogin(account.id, meta.ip);
 
   // Never let the credential leave the server — strip the hash before returning.
   const { passwordHash: _hash, ...publicUser } = account;
   void _hash;
   const user = { ...publicUser, sessionId: "" } as SessionUser;
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "login",
     userId: account.id,
     summary: "Signed in",
@@ -158,26 +161,26 @@ export function signIn(
   return { user, token, expiresAt };
 }
 
-export function signOut(
+export async function signOut(
   token: string | null,
   user: SessionUser | null,
   meta: RequestMeta
-): void {
-  destroySession(token);
+): Promise<void> {
+  await destroySession(token);
   if (user) {
-    activity.logActivity({ actionKey: "logout", userId: user.id, summary: "Signed out", ...meta });
+    await activity.logActivity({ actionKey: "logout", userId: user.id, summary: "Signed out", ...meta });
   }
 }
 
-export function changePassword(
+export async function changePassword(
   user: SessionUser,
   currentPassword: string,
   newPassword: string,
   meta: RequestMeta
-): void {
-  const account = users.findByEmail(user.email);
+): Promise<void> {
+  const account = await users.findByEmail(user.email);
   if (!account || !verifyPassword(currentPassword, account.passwordHash)) {
-    activity.logActivity({
+    await activity.logActivity({
       actionKey: "loginFailed",
       userId: user.id,
       summary: "Password change rejected — current password incorrect",
@@ -188,15 +191,15 @@ export function changePassword(
       currentPassword: "Incorrect password.",
     });
   }
-  users.setPassword(user.id, newPassword);
-  activity.logActivity({
+  await users.setPassword(user.id, newPassword);
+  await activity.logActivity({
     actionKey: "passwordChanged",
     userId: user.id,
     summary: "Password changed",
     severity: "critical",
     ...meta,
   });
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId: user.id,
     title: "Password changed",
     body: "Your account password was updated. If this wasn't you, contact support immediately.",
@@ -205,17 +208,17 @@ export function changePassword(
   });
 }
 
-export function updateProfile(
+export async function updateProfile(
   user: SessionUser,
   patch: { name?: string; phone?: string; country?: string },
   meta: RequestMeta
-): PublicUser {
-  const updated = users.updateUser(user.id, patch);
+): Promise<PublicUser> {
+  const updated = await users.updateUser(user.id, patch);
   if (!updated) throw new ApiError(404, "Account not found.");
   const changed = Object.entries(patch)
     .filter(([, v]) => typeof v === "string" && v !== undefined)
     .map(([k]) => k);
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "profileUpdated",
     userId: user.id,
     summary: `Updated profile (${changed.join(", ") || "no changes"})`,
@@ -225,9 +228,9 @@ export function updateProfile(
   return updated;
 }
 
-export function countActiveSessions(userId: string): number {
-  const row = db()
+export async function countActiveSessions(userId: string): Promise<number> {
+  const row = (await db()
     .prepare("SELECT COUNT(*) AS c FROM sessions WHERE user_id = ? AND expires_at > ?")
-    .get(userId, new Date().toISOString()) as { c: number };
+    .get(userId, new Date().toISOString())) as { c: number };
   return row.c;
 }

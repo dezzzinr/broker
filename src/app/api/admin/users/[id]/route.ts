@@ -28,16 +28,16 @@ export async function GET(_req: Request, ctx: Ctx) {
   try {
     const admin = await requireApiAdmin();
     const { id } = await ctx.params;
-    const user = getAdminUser(id);
+    const user = await getAdminUser(id);
     if (!user) throw notFound("That account no longer exists.");
 
-    const funds = listFundRequests({ userId: id, pageSize: 20 });
-    const ledger = listLedger({ userId: id, pageSize: 20 });
-    const activityRows = listActivity({ userId: id, pageSize: 30 });
+    const funds = await listFundRequests({ userId: id, pageSize: 20 });
+    const ledger = await listLedger({ userId: id, pageSize: 20 });
+    const activityRows = await listActivity({ userId: id, pageSize: 30 });
 
     return ok({
       user,
-      balances: getBalances(id),
+      balances: await getBalances(id),
       fundRequests: funds.rows,
       fundTotal: funds.total,
       transactions: ledger.rows,
@@ -60,17 +60,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const { id } = await ctx.params;
     const patch = await readJson(req, adminUserPatchSchema);
 
-    if (!getAdminUser(id)) throw notFound("That account no longer exists.");
-
-    let user = getAdminUser(id)!;
+    let user = await getAdminUser(id);
+    if (!user) throw notFound("That account no longer exists.");
     if (patch.status && patch.status !== user.status) {
-      setUserStatus(admin, id, patch.status, meta, "");
+      await setUserStatus(admin, id, patch.status, meta, "");
     }
     if (patch.role && patch.role !== user.role) {
-      setUserRole(admin, id, patch.role, meta);
+      await setUserRole(admin, id, patch.role, meta);
     }
     if (patch.kycStatus && patch.kycStatus !== user.kycStatus) {
-      setKycStatus(admin, id, patch.kycStatus, meta);
+      await setKycStatus(admin, id, patch.kycStatus, meta);
     }
 
     const profilePatch = {
@@ -81,10 +80,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
       ...(patch.twoFactor !== undefined ? { twoFactor: patch.twoFactor } : {}),
     };
     if (Object.keys(profilePatch).length > 0) {
-      updateUser(id, profilePatch);
+      await updateUser(id, profilePatch);
     }
 
-    user = getAdminUser(id)!;
+    user = (await getAdminUser(id))!;
     return ok({ user });
   } catch (error) {
     return handleApiError(error);
@@ -98,7 +97,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     const admin = await requireApiAdmin();
     const meta = await requestMeta();
     const { id } = await ctx.params;
-    deleteUser(admin, id, meta);
+    await deleteUser(admin, id, meta);
     return ok({ deleted: true });
   } catch (error) {
     return handleApiError(error);

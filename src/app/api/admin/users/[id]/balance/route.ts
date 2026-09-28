@@ -17,10 +17,10 @@ export async function POST(req: Request, ctx: Ctx) {
     const admin = await requireApiAdmin();
     const meta = await requestMeta();
     const { id } = await ctx.params;
-    if (!getAdminUser(id)) throw notFound("That account no longer exists.");
+    if (!await getAdminUser(id)) throw notFound("That account no longer exists.");
 
     const input = await readJson(req, balanceAdjustSchema);
-    const result = adjustBalance(admin, id, input.asset, input.amount, input.reason, meta);
+    const result = await adjustBalance(admin, id, input.asset, input.amount, input.reason, meta);
     return ok(result);
   } catch (error) {
     return handleApiError(error);

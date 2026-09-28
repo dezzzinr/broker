@@ -16,10 +16,10 @@ export async function GET(_req: Request, ctx: Ctx) {
     await requireApiAdmin();
     const { id } = await ctx.params;
 
-    const request = getFundRequest(id);
+    const request = await getFundRequest(id);
     if (!request) throw notFound("That request no longer exists.");
 
-    const proof = getProof(id);
+    const proof = await getProof(id);
     if (!proof) throw notFound("No proof of payment was attached to this request.");
 
     return new Response(new Uint8Array(proof.data), {

@@ -13,10 +13,10 @@ export async function GET() {
     const user = await requireApiUser();
     return ok({
       user,
-      balances: getBalances(user.id),
-      unreadNotifications: unreadCount(user.id),
-      sessions: countActiveSessions(user.id),
-      pendingReviews: user.role === "admin" ? countPending("deposit") + countPending("withdrawal") : null,
+      balances: await getBalances(user.id),
+      unreadNotifications: await unreadCount(user.id),
+      sessions: await countActiveSessions(user.id),
+      pendingReviews: user.role === "admin" ? await countPending("deposit") + await countPending("withdrawal") : null,
     });
   } catch (error) {
     return handleApiError(error);

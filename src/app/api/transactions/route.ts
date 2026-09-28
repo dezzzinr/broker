@@ -17,7 +17,7 @@ export async function GET(req: Request) {
     const pageSize = Math.min(100, Math.max(10, Number(url.searchParams.get("pageSize") ?? 50)));
     const query = url.searchParams.get("q") ?? "";
 
-    const result = listLedger({ userId: user.id, type, page, pageSize, query });
+    const result = await listLedger({ userId: user.id, type, page, pageSize, query });
     return ok(result);
   } catch (error) {
     return handleApiError(error);

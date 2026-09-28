@@ -28,7 +28,7 @@ export async function GET(req: Request) {
       | "cancelled";
     const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
 
-    const result = listFundRequests({
+    const result = await listFundRequests({
       userId: user.id,
       kind,
       status,
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
       if (!check.ok) throw badRequest(check.message, { proof: check.message });
 
       const buffer = Buffer.from(await file.arrayBuffer());
-      const request = submitDeposit(
+      const request = await submitDeposit(
         user,
         {
           methodId: payload.methodId,
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
     const limit = rateLimit(`withdraw:${user.id}`, 12, 60 * 60_000);
     if (!limit.allowed) throw tooMany("Too many withdrawal requests. Please wait an hour.");
 
-    const request = submitWithdrawal(user, parsed, meta);
+    const request = await submitWithdrawal(user, parsed, meta);
     return ok({ request }, 201);
   } catch (error) {
     return handleApiError(error);

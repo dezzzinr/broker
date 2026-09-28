@@ -19,15 +19,15 @@ import type { PublicUser } from "@/lib/types/platform";
 export const SESSION_COOKIE = "quantix_session";
 export const SESSION_TTL_DAYS = 30;
 
-export function createSession(
+export async function createSession(
   userId: string,
   ip = "",
   userAgent = ""
-): { token: string; expiresAt: Date } {
+): Promise<{ token: string; expiresAt: Date }> {
   const token = generateToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
-  db()
+  await db()
     .prepare(
       `INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen_at, ip, user_agent)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -48,74 +48,79 @@ export interface SessionUser extends PublicUser {
   sessionId: string;
 }
 
-export function readSession(token: string | undefined | null): SessionUser | null {
+export async function readSession(
+  token: string | undefined | null
+): Promise<SessionUser | null> {
   if (!token) return null;
-  const row = db()
+  const row = (await db()
     .prepare(
       `SELECT s.id AS session_id, s.expires_at, s.ip AS session_ip, s.user_agent AS session_ua, u.*
          FROM sessions s
          JOIN users u ON u.id = s.user_id
         WHERE s.id = ?`
     )
-    .get(hashToken(token)) as
+    .get(hashToken(token))) as
     | (Record<string, unknown> & { session_id: string; expires_at: string })
     | undefined;
 
   if (!row) return null;
 
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    db().prepare("DELETE FROM sessions WHERE id = ?").run(row.session_id);
+    await db().prepare("DELETE FROM sessions WHERE id = ?").run(row.session_id);
     return null;
   }
   if (row.status !== "active") {
     // Suspended accounts lose every session immediately.
-    db().prepare("DELETE FROM sessions WHERE user_id = ?").run(row.id);
+    await db().prepare("DELETE FROM sessions WHERE user_id = ?").run(row.id);
     return null;
   }
   return { ...mapUser(row), sessionId: row.session_id };
 }
 
-/** Sliding expiry — only rewrite `expires_at` when it is within a week of lapsing. */
-export function touchSession(sessionId: string): void {
-  const now = new Date().toISOString();
-  db()
-    .prepare(
-      `UPDATE sessions
-          SET last_seen_at = ?,
-              expires_at = CASE
-                WHEN julianday(expires_at) - julianday(?) < 7
-                  THEN datetime(?, '+' || ? || ' days')
-                ELSE expires_at
-              END
-        WHERE id = ?`
-    )
-    .run(now, now, now, SESSION_TTL_DAYS, sessionId);
+/**
+ * Sliding expiry — only rewrite `expires_at` when it is within a week of
+ * lapsing. The date arithmetic lives in JS (portable across SQLite/Postgres).
+ */
+export async function touchSession(sessionId: string): Promise<void> {
+  const now = new Date();
+  const row = (await db()
+    .prepare("SELECT expires_at FROM sessions WHERE id = ?")
+    .get(sessionId)) as { expires_at: string } | undefined;
+  if (!row) return;
+  const expiresAt = new Date(row.expires_at).getTime();
+  const withinWeek = expiresAt - now.getTime() < 7 * 24 * 60 * 60 * 1000;
+  const nextExpiry = withinWeek
+    ? new Date(now.getTime() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    : row.expires_at;
+  await db()
+    .prepare("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?")
+    .run(now.toISOString(), nextExpiry, sessionId);
 }
 
-export function destroySession(token: string | undefined | null): void {
+export async function destroySession(token: string | undefined | null): Promise<void> {
   if (!token) return;
-  db().prepare("DELETE FROM sessions WHERE id = ?").run(hashToken(token));
+  await db().prepare("DELETE FROM sessions WHERE id = ?").run(hashToken(token));
 }
 
-export function destroyAllSessions(userId: string, exceptToken?: string): number {
+export async function destroyAllSessions(userId: string, exceptToken?: string): Promise<number> {
   const keep = exceptToken ? hashToken(exceptToken) : null;
   const info = keep
-    ? db().prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").run(userId, keep)
-    : db().prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+    ? await db().prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").run(userId, keep)
+    : await db().prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
   return info.changes;
 }
 
-export function purgeExpiredSessions(): void {
-  db().prepare("DELETE FROM sessions WHERE expires_at < ?").run(new Date().toISOString());
+export async function purgeExpiredSessions(): Promise<void> {
+  await db().prepare("DELETE FROM sessions WHERE expires_at < ?").run(new Date().toISOString());
 }
 
-export function listSessions(userId: string) {
-  const rows = db()
+export async function listSessions(userId: string) {
+  const rows = (await db()
     .prepare(
       `SELECT id, created_at, expires_at, last_seen_at, ip, user_agent
          FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC`
     )
-    .all(userId) as {
+    .all(userId)) as {
     id: string;
     created_at: string;
     expires_at: string;
@@ -147,8 +152,8 @@ export function sessionCookieOptions(expiresAt: Date) {
 export async function getSessionUser(): Promise<SessionUser | null> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
-  const user = readSession(token);
-  if (user) touchSession(user.sessionId);
+  const user = await readSession(token);
+  if (user) await touchSession(user.sessionId);
   return user;
 }
 
@@ -159,8 +164,8 @@ export async function getSessionUserWithToken(): Promise<{
 }> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value ?? null;
-  const user = readSession(token);
-  if (user) touchSession(user.sessionId);
+  const user = await readSession(token);
+  if (user) await touchSession(user.sessionId);
   return { user, token };
 }
 

@@ -33,29 +33,29 @@ function assertNotSelf(admin: SessionUser, userId: string, what: string) {
   }
 }
 
-function requireTarget(userId: string): PublicUser {
-  const user = users.findById(userId);
+async function requireTarget(userId: string): Promise<PublicUser> {
+  const user = await users.findById(userId);
   if (!user) throw new ApiError(404, "That account no longer exists.");
   return user;
 }
 
-export function setUserStatus(
+export async function setUserStatus(
   admin: SessionUser,
   userId: string,
   status: PublicUser["status"],
   meta: RequestMeta,
   reason = ""
-): PublicUser {
+): Promise<PublicUser> {
   assertNotSelf(admin, userId, "suspend");
-  const target = requireTarget(userId);
-  const updated = users.updateUser(userId, { status });
+  const target = await requireTarget(userId);
+  const updated = await users.updateUser(userId, { status });
   if (!updated) throw new ApiError(500, "Could not update the account.");
 
   if (status === "suspended") {
-    destroyAllSessions(userId);
+    await destroyAllSessions(userId);
   }
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "userStatusChanged",
     userId,
     actorId: admin.id,
@@ -67,7 +67,7 @@ export function setUserStatus(
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId,
     title: status === "suspended" ? "Account suspended" : "Account reactivated",
     body:
@@ -81,26 +81,26 @@ export function setUserStatus(
   return updated;
 }
 
-export function setUserRole(
+export async function setUserRole(
   admin: SessionUser,
   userId: string,
   role: UserRole,
   meta: RequestMeta
-): PublicUser {
+): Promise<PublicUser> {
   assertNotSelf(admin, userId, "change the role of");
-  const target = requireTarget(userId);
+  const target = await requireTarget(userId);
   if (target.role === role) return target;
 
   if (target.role === "admin" && role === "user") {
-    const admins = users.countAdmins();
+    const admins = await users.countAdmins();
     if (admins <= 1) throw new ApiError(400, "The platform needs at least one administrator.");
   }
 
-  const updated = users.updateUser(userId, { role });
+  const updated = await users.updateUser(userId, { role });
   if (!updated) throw new ApiError(500, "Could not update the account.");
-  if (role === "user") destroyAllSessions(userId);
+  if (role === "user") await destroyAllSessions(userId);
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "userRoleChanged",
     userId,
     actorId: admin.id,
@@ -112,7 +112,7 @@ export function setUserRole(
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId,
     title: role === "admin" ? "You are now an administrator" : "Administrator access removed",
     body:
@@ -126,17 +126,17 @@ export function setUserRole(
   return updated;
 }
 
-export function setKycStatus(
+export async function setKycStatus(
   admin: SessionUser,
   userId: string,
   kycStatus: PublicUser["kycStatus"],
   meta: RequestMeta
-): PublicUser {
-  const target = requireTarget(userId);
-  const updated = users.updateUser(userId, { kycStatus });
+): Promise<PublicUser> {
+  const target = await requireTarget(userId);
+  const updated = await users.updateUser(userId, { kycStatus });
   if (!updated) throw new ApiError(500, "Could not update the account.");
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "userStatusChanged",
     userId,
     actorId: admin.id,
@@ -147,7 +147,7 @@ export function setKycStatus(
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId,
     title: `Identity verification ${kycStatus}`,
     body:
@@ -163,23 +163,23 @@ export function setKycStatus(
   return updated;
 }
 
-export function adjustBalance(
+export async function adjustBalance(
   admin: SessionUser,
   userId: string,
   asset: string,
   amount: number,
   reason: string,
   meta: RequestMeta
-): { balance: number } {
-  const target = requireTarget(userId);
-  wallet.ensureAssets(userId, [asset]);
+): Promise<{ balance: number }> {
+  const target = await requireTarget(userId);
+  await wallet.ensureAssets(userId, [asset]);
 
-  const next = transaction<number>(() => {
+  const next = await transaction<number>(async () => {
     const balance =
       amount >= 0
-        ? wallet.credit(userId, asset, amount)
-        : wallet.debit(userId, asset, Math.abs(amount));
-    db()
+        ? await wallet.credit(userId, asset, amount)
+        : await wallet.debit(userId, asset, Math.abs(amount));
+    await db()
       .prepare(
         `INSERT INTO transactions (id, user_id, type, asset, amount, price, fee, status, note, created_at)
          VALUES (?, ?, 'adjustment', ?, ?, 1, 0, 'completed', ?, ?)`
@@ -195,7 +195,7 @@ export function adjustBalance(
     return balance.amount;
   });
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "balanceAdjusted",
     userId,
     actorId: admin.id,
@@ -207,7 +207,7 @@ export function adjustBalance(
     ...meta,
   });
 
-  notifications.pushNotification({
+  await notifications.pushNotification({
     userId,
     title: `${amount >= 0 ? "Credit" : "Debit"} of ${Math.abs(amount)} ${asset}`,
     body: `${reason} — applied by the Quantix operations team.`,
@@ -218,18 +218,18 @@ export function adjustBalance(
   return { balance: next };
 }
 
-export function resetUserPassword(
+export async function resetUserPassword(
   admin: SessionUser,
   userId: string,
   newPassword: string,
   notifyUser: boolean,
   meta: RequestMeta
-): void {
-  const target = requireTarget(userId);
-  users.setPassword(userId, newPassword);
-  destroyAllSessions(userId);
+): Promise<void> {
+  const target = await requireTarget(userId);
+  await users.setPassword(userId, newPassword);
+  await destroyAllSessions(userId);
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "passwordReset",
     userId,
     actorId: admin.id,
@@ -241,7 +241,7 @@ export function resetUserPassword(
   });
 
   if (notifyUser) {
-    notifications.pushNotification({
+    await notifications.pushNotification({
       userId,
       title: "Password reset by an administrator",
       body: "Your password was changed and every device was signed out. Sign in with the new password.",
@@ -251,16 +251,16 @@ export function resetUserPassword(
   }
 }
 
-export function deleteUser(admin: SessionUser, userId: string, meta: RequestMeta): void {
+export async function deleteUser(admin: SessionUser, userId: string, meta: RequestMeta): Promise<void> {
   assertNotSelf(admin, userId, "delete");
-  const target = requireTarget(userId);
+  const target = await requireTarget(userId);
   if (target.role === "admin") {
     throw new ApiError(400, "Administrator accounts cannot be deleted. Demote the account first.");
   }
 
-  users.deleteUser(userId);
+  await users.deleteUser(userId);
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "userDeleted",
     userId: null,
     actorId: admin.id,
@@ -275,17 +275,17 @@ export function deleteUser(admin: SessionUser, userId: string, meta: RequestMeta
 
 /* ------------------------------ deposit methods -------------------------- */
 
-export function saveMethod(
+export async function saveMethod(
   admin: SessionUser,
   input: Partial<MethodInput> & { id?: string },
   meta: RequestMeta
-): DepositMethod {
+): Promise<DepositMethod> {
   const { id, ...rest } = input;
   if (id) {
-    const before = methods.getMethod(id);
+    const before = await methods.getMethod(id);
     if (!before) throw new ApiError(404, "Deposit method not found.");
-    const updated = methods.updateMethod(id, rest);
-    activity.logActivity({
+    const updated = await methods.updateMethod(id, rest);
+    await activity.logActivity({
       actionKey: "methodUpdated",
       userId: null,
       actorId: admin.id,
@@ -298,8 +298,8 @@ export function saveMethod(
     return updated!;
   }
 
-  const created = methods.createMethod(rest as MethodInput);
-  activity.logActivity({
+  const created = await methods.createMethod(rest as MethodInput);
+  await activity.logActivity({
     actionKey: "methodCreated",
     userId: null,
     actorId: admin.id,
@@ -312,22 +312,22 @@ export function saveMethod(
   return created;
 }
 
-export function removeMethod(admin: SessionUser, id: string, meta: RequestMeta): void {
-  const method = methods.getMethod(id);
+export async function removeMethod(admin: SessionUser, id: string, meta: RequestMeta): Promise<void> {
+  const method = await methods.getMethod(id);
   if (!method) throw new ApiError(404, "Deposit method not found.");
-  const pending = db()
+  const pending = (await db()
     .prepare(
       "SELECT COUNT(*) AS c FROM fund_requests WHERE method_id = ? AND status = 'pending'"
     )
-    .get(id) as { c: number };
+    .get(id)) as { c: number };
   if (pending.c > 0) {
     throw new ApiError(
       409,
       `${pending.c} request(s) are still pending against this method. Disable it instead.`
     );
   }
-  methods.deleteMethod(id);
-  activity.logActivity({
+  await methods.deleteMethod(id);
+  await activity.logActivity({
     actionKey: "methodDeleted",
     userId: null,
     actorId: admin.id,
@@ -341,18 +341,18 @@ export function removeMethod(admin: SessionUser, id: string, meta: RequestMeta):
 
 /* --------------------------- platform configuration ---------------------- */
 
-export function savePlatformSettings(
+export async function savePlatformSettings(
   admin: SessionUser,
   patch: Partial<PlatformSettings>,
   meta: RequestMeta
-): PlatformSettings {
-  const before = settingsRepo.getPlatformSettings();
-  const next = settingsRepo.updatePlatformSettings(patch);
+): Promise<PlatformSettings> {
+  const before = await settingsRepo.getPlatformSettings();
+  const next = await settingsRepo.updatePlatformSettings(patch);
   const changes = (Object.keys(patch) as (keyof PlatformSettings)[]).filter(
     (key) => before[key] !== next[key]
   );
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "settingsUpdated",
     userId: null,
     actorId: admin.id,
@@ -372,19 +372,19 @@ function pick<T extends object>(obj: T, keys: (keyof T)[]): Record<string, unkno
   return out;
 }
 
-export function publishAnnouncement(
+export async function publishAnnouncement(
   admin: SessionUser,
   input: { title: string; body: string; tag?: string; pinned?: boolean; broadcast?: boolean },
   meta: RequestMeta
-): Announcement {
-  const announcement = settingsRepo.createAnnouncement({
+): Promise<Announcement> {
+  const announcement = await settingsRepo.createAnnouncement({
     title: input.title,
     body: input.body,
     tag: input.tag,
     pinned: input.pinned,
   });
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "announcementCreated",
     userId: null,
     actorId: admin.id,
@@ -395,13 +395,13 @@ export function publishAnnouncement(
   });
 
   if (input.broadcast !== false) {
-    const reached = settingsRepo.broadcast({
+    const reached = await settingsRepo.broadcast({
       title: announcement.title,
       body: announcement.body.slice(0, 160),
       kind: "info",
       href: "/support",
     });
-    activity.logActivity({
+    await activity.logActivity({
       actionKey: "announcementCreated",
       userId: null,
       actorId: admin.id,
@@ -416,9 +416,9 @@ export function publishAnnouncement(
   return announcement;
 }
 
-export function removeAnnouncement(admin: SessionUser, id: string, meta: RequestMeta): void {
-  settingsRepo.deleteAnnouncement(id);
-  activity.logActivity({
+export async function removeAnnouncement(admin: SessionUser, id: string, meta: RequestMeta): Promise<void> {
+  await settingsRepo.deleteAnnouncement(id);
+  await activity.logActivity({
     actionKey: "announcementDeleted",
     userId: null,
     actorId: admin.id,
@@ -431,18 +431,18 @@ export function removeAnnouncement(admin: SessionUser, id: string, meta: Request
 }
 
 /** Broadcast a one-off notification to every user (used from the console). */
-export function broadcastMessage(
+export async function broadcastMessage(
   admin: SessionUser,
   input: { title: string; body: string; href?: string },
   meta: RequestMeta
-): number {
-  const reached = settingsRepo.broadcast({
+): Promise<number> {
+  const reached = await settingsRepo.broadcast({
     title: input.title,
     body: input.body,
     href: input.href ?? "/support",
     kind: "info",
   });
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "announcementCreated",
     userId: null,
     actorId: admin.id,

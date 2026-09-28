@@ -24,11 +24,11 @@ export async function POST(req: Request) {
     if (!limit.allowed) throw tooMany("Too many accounts created from this device. Try again later.");
 
     const input = await readJson(req, signupSchema);
-    if (!getPlatformSettings().registrationsOpen) {
+    if (!(await getPlatformSettings()).registrationsOpen) {
       throw new ApiError(403, "Registrations are currently closed. Please contact support.");
     }
 
-    const { user, token, expiresAt } = signUp(
+    const { user, token, expiresAt } = await signUp(
       {
         name: input.name,
         email: input.email,

@@ -6,7 +6,7 @@ administrators run the platform from a separate control centre that reviews ever
 monitors every action.
 
 Built with **Next.js 15 (App Router, Turbopack)**, **React 19**, **TypeScript**, **Tailwind CSS v4**,
-**better-sqlite3**, **Zod**, **Recharts** and shadcn-style UI primitives.
+**better-sqlite3** / **Postgres** storage, **Zod**, **Recharts** and shadcn-style UI primitives.
 
 > **Scope note** — account data, balances, funding requests, orders and the audit log are real and
 > persisted in SQLite. Market *prices* stream from a self-contained simulated feed
@@ -26,8 +26,14 @@ npm run db:info    # row counts per table
 npm run db:reset   # delete the database and re-seed it
 ```
 
-The database is created and seeded automatically on first run at `data/quantix.db`
-(override with `QUANTIX_DB_PATH`). Uploaded proofs of payment are stored as BLOBs in the same file.
+The default store is a local SQLite database, created and seeded automatically on first run at
+`data/quantix.db` (override with `QUANTIX_DB_PATH`). Uploaded proofs of payment are stored as
+BLOBs in the same file.
+
+To run against **Postgres** instead (required for serverless deployment — see below), set
+`POSTGRES_URL` (or `DATABASE_URL`) and the same schema is created and seeded there on first run.
+Both backends speak the same SQL subset through `src/lib/server/db.ts`, so the app code is
+identical either way.
 
 ### Seeded accounts
 
@@ -41,35 +47,32 @@ console and analytics have something to show. Login cards on `/login` fill these
 
 ## Deploying to Vercel
 
-A Vercel deployment needs **no configuration** — but read this before pointing real users at it.
+**Use Vercel Postgres (or any hosted Postgres/Neon database).** The app runs on two storage
+backends — local SQLite for development and Postgres for deployment — selected by `POSTGRES_URL`:
 
-Vercel's function filesystem is **read-only** except `/tmp`, so `data/quantix.db` cannot be created
-at `process.cwd()` (that is the classic `EROFS: read-only file system` failure). `src/lib/server/db.ts`
-probes for a writable location and automatically falls back to `<os tmpdir>/quantix.db` on Vercel,
-logging a warning — the app **runs** out of the box.
+1. In the Vercel dashboard → **Storage** → create a **Postgres** database and link it to the
+   project. Vercel injects `POSTGRES_URL` automatically — nothing else to configure.
+2. Deploy. On the first request the schema is created and the demo data seeded (guarded by an
+   advisory lock, so concurrent cold starts can't double-seed).
 
-What that fallback does **not** give you is persistence:
+Every function instance then reads and writes the **same** database: signups, sessions, deposits
+and trades persist across requests, instances and deploys. (This is the fix for the classic
+blank-dashboard-after-signup failure: with a per-function file database, one function writes the
+account and the next function has never heard of it.)
 
-- `/tmp` is **ephemeral** — it lives only for the lifetime of a warm function instance and is wiped
-  on cold starts. Concurrent instances each get their own database and don't share state.
-- For a demo, preview or review environment this is acceptable (the DB re-seeds itself on first use).
-  For anything real, signups, balances and approvals would silently vanish.
+Why not SQLite on Vercel: the function filesystem is read-only except `/tmp`, and `/tmp` is
+private to each function instance and wiped on cold starts. `db.ts` still falls back to an
+ephemeral `/tmp/quantix.db` (with a loud warning) if you run there **without** `POSTGRES_URL` —
+enough for a throwaway demo, never for real users.
 
-Pick one when you outgrow the demo:
+Other notes:
 
-1. **Hosted database (the proper fix).** Point the app at a network database — Turso (libSQL),
-   Neon/Vercel Postgres, etc. — instead of a local file. The schema and service layer stay intact;
-   only `db.ts` changes.
-2. **A host with a persistent disk.** Fly.io, Railway, Render or a plain VPS keep `data/quantix.db`
-   across deploys and restarts; set `QUANTIX_DB_PATH` if you want it outside the app directory.
-
-Two more Vercel notes:
-
-- `better-sqlite3` is a native addon and is compiled from source (`node-gyp`) during
-  `npm install`. Vercel's build image supports this; if the build log ever shows `gyp` errors,
-  make sure the project's Node.js version is a supported LTS (20.x/22.x).
-- The uploaded proof-of-payment blobs already live inside the SQLite file (BLOBs), so no separate
-  upload directory is required — the database story above covers them too.
+- Proofs of payment are stored **inside** the database (BLOB/BYTEA), so no separate upload
+  storage is needed.
+- `better-sqlite3` is only loaded on the SQLite path; Postgres deployments never touch it at
+  runtime. It remains installed (harmless) and keeps local development simple.
+- Prefer a plain VM with a disk instead? Fly.io, Railway, Render or a VPS work unchanged with
+  the SQLite backend — that is still the simplest fully self-contained option.
 
 ## Trader app
 
@@ -142,7 +145,7 @@ src/
 │   ├── charts/, market/, shared/, ui/
 ├── lib/
 │   ├── server/
-│   │   ├── db.ts          # better-sqlite3 bootstrap, schema, WAL, transaction helper
+│   │   ├── db.ts          # async db facade — SQLite (better-sqlite3) or Postgres, schema, transactions
 │   │   ├── seed.ts        # personas, methods, funding history, ledger, activity
 │   │   ├── auth.ts        # cookie sessions (30d), requireUser/requireAdmin RSC guards
 │   │   ├── crypto.ts      # scrypt hashing + timing-safe comparison
@@ -161,7 +164,7 @@ src/
 
 `users`, `sessions`, `balances`, `deposit_methods`, `fund_requests` (with proof BLOB),
 `transactions` (the ledger), `activity_logs`, `notifications`, `announcements`, `app_settings`,
-`login_attempts` — SQLite with WAL and foreign keys enabled. Money only ever moves inside a
+`login_attempts` — SQLite (WAL) or Postgres depending on `POSTGRES_URL`, foreign keys enabled. Money only ever moves inside a
 `transaction(() => …)` block, so a wallet debit, its ledger entry and the audit record are atomic.
 
 ### Security

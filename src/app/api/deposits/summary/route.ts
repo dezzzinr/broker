@@ -9,12 +9,12 @@ export async function GET() {
   try {
     const user = await requireApiUser();
 
-    const balances = getBalances(user.id);
+    const balances = await getBalances(user.id);
     const cash =
       (balances.find((b) => b.asset === "USD")?.amount ?? 0) +
       (balances.find((b) => b.asset === "USDT")?.amount ?? 0);
 
-    const all = listFundRequests({ userId: user.id, pageSize: 500 });
+    const all = await listFundRequests({ userId: user.id, pageSize: 500 });
     const deposits = all.rows.filter((r) => r.kind === "deposit");
     const pending = deposits.filter((r) => r.status === "pending");
     const approved = deposits.filter((r) => r.status === "approved");

@@ -25,7 +25,11 @@ export interface PlaceOrderInput {
 
 const FEE_RATE = 0.001;
 
-export function placeOrder(user: SessionUser, input: PlaceOrderInput, meta: RequestMeta) {
+export async function placeOrder(
+  user: SessionUser,
+  input: PlaceOrderInput,
+  meta: RequestMeta
+) {
   const { coin, side, orderType, baseAmount, price } = input;
   const quoteAsset = "USD";
   const baseAsset = coin.symbol;
@@ -42,11 +46,11 @@ export function placeOrder(user: SessionUser, input: PlaceOrderInput, meta: Requ
   const gross = baseAmount * price;
   const fee = Math.round(gross * FEE_RATE * 100) / 100;
 
-  wallet.ensureAssets(user.id, [baseAsset, quoteAsset]);
+  await wallet.ensureAssets(user.id, [baseAsset, quoteAsset]);
 
   let result: { txId: string };
   try {
-    result = wallet.executeTrade({
+    result = await wallet.executeTrade({
       userId: user.id,
       side,
       baseAsset,
@@ -58,7 +62,7 @@ export function placeOrder(user: SessionUser, input: PlaceOrderInput, meta: Requ
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Order could not be filled.";
-    activity.logActivity({
+    await activity.logActivity({
       actionKey: "tradeExecuted",
       userId: user.id,
       summary: `${side === "buy" ? "Buy" : "Sell"} order rejected — ${message}`,
@@ -70,7 +74,7 @@ export function placeOrder(user: SessionUser, input: PlaceOrderInput, meta: Requ
     throw new ApiError(400, message, { amount: message });
   }
 
-  activity.logActivity({
+  await activity.logActivity({
     actionKey: "tradeExecuted",
     userId: user.id,
     summary: `${side === "buy" ? "Bought" : "Sold"} ${baseAmount} ${baseAsset} at ${price.toFixed(2)} (${orderType})`,
@@ -82,7 +86,7 @@ export function placeOrder(user: SessionUser, input: PlaceOrderInput, meta: Requ
   });
 
   if (user.role === "user") {
-    notifications.pushNotification({
+    await notifications.pushNotification({
       userId: user.id,
       title: `${side === "buy" ? "Buy" : "Sell"} order filled`,
       body: `${baseAmount} ${baseAsset} at ${price.toFixed(2)} · fee ${fee.toFixed(2)} USD`,
@@ -96,6 +100,6 @@ export function placeOrder(user: SessionUser, input: PlaceOrderInput, meta: Requ
     fee,
     gross,
     total: side === "buy" ? gross + fee : gross - fee,
-    balances: wallet.getBalances(user.id),
+    balances: await wallet.getBalances(user.id),
   };
 }
